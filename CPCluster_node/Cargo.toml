@@ -1,0 +1,24 @@
+[package]
+name = "cpcluster_node"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Tokio für asynchrone Operationen
+tokio = { version = "1", features = ["full"] }
+
+# Tokio Rustls für TLS-Verbindungen
+tokio-rustls = "0.23"
+
+# Rustls für TLS-Konfigurationen und Zertifikate
+rustls = "0.20.9"
+
+# Rustls-pemfile zum Einlesen von Zertifikaten und Schlüsseln im PEM-Format
+rustls-pemfile = "0.2.1"
+
+# Serde für Serialisierung/Deserialisierung
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# UUID für eindeutige Aufgaben-IDs
+uuid = { version = "1", features = ["v4"] }

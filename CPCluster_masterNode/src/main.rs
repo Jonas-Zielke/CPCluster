@@ -1,21 +1,19 @@
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-use std::error::Error;
+use std::{collections::HashMap, error::Error, fs, sync::{Arc, Mutex}};
+use serde::{Deserialize, Serialize};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio_rustls::TlsAcceptor;
-use rustls::{Certificate, PrivateKey, ServerConfig};
-use rustls_pemfile::{certs, pkcs8_private_keys};
-use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::process::Command;
-use std::path::Path;
-use std::io::BufReader;
+use uuid::Uuid;
+
+#[derive(Serialize, Deserialize)]
+struct JoinInfo {
+    token: String,
+    ip: String,
+    port: String,
+}
 
 #[derive(Debug, Clone)]
 struct MasterNode {
-    tasks: Arc<Mutex<Vec<Task>>>,
-    connected_nodes: Arc<Mutex<HashMap<String, TcpStream>>>,
+    connected_nodes: Arc<Mutex<HashMap<String, String>>>,  // speichert IP-Adressen als Strings
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -24,34 +22,37 @@ struct Task {
     data: Vec<u8>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+enum NodeMessage {
+    GetConnectedNodes,
+    ConnectedNodes(Vec<String>),
+    Task(Task),
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let cert_path = "certs/cert.pem";
-    let key_path = "certs/key.pem";
+    let token = generate_token();
+    let ip = "127.0.0.1".to_string();
+    let port = "55000".to_string();
 
-    // Zertifikate überprüfen und ggf. generieren
-    check_and_generate_certs(cert_path, key_path)?;
+    let join_info = JoinInfo { token: token.clone(), ip: ip.clone(), port: port.clone() };
+    fs::write("join.json", serde_json::to_string_pretty(&join_info)?)?;
+    println!("Join information saved to join.json");
 
-    // TLS-Serverkonfiguration laden
-    let tls_server_config = load_tls_server_config(cert_path, key_path)?;
-    let acceptor = TlsAcceptor::from(tls_server_config.clone());
-
-    // TCP-Listener auf Port 55000
-    let listener = TcpListener::bind("0.0.0.0:55000").await?;
-    println!("Master Node listening on port 55000");
+    let listener = TcpListener::bind(format!("{}:{}", ip, port)).await?;
+    println!("Master Node listening on {}:{}", ip, port);
 
     let master_node = Arc::new(MasterNode {
-        tasks: Arc::new(Mutex::new(Vec::new())),
         connected_nodes: Arc::new(Mutex::new(HashMap::new())),
     });
 
     loop {
-        let (socket, _) = listener.accept().await?;
-        let acceptor = acceptor.clone();
+        let (stream, addr) = listener.accept().await?;
         let master_node = Arc::clone(&master_node);
+        let token = token.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(acceptor, socket, master_node).await {
+            if let Err(e) = handle_connection(stream, master_node, token, addr.to_string()).await {
                 eprintln!("Connection error: {:?}", e);
             }
         });
@@ -59,74 +60,60 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 }
 
 async fn handle_connection(
-    acceptor: TlsAcceptor,
-    socket: TcpStream,
+    mut socket: TcpStream,
     master_node: Arc<MasterNode>,
+    token: String,
+    addr: String,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let mut tls_stream = acceptor.accept(socket).await?;
-
     let mut buf = [0; 1024];
-    let n = tls_stream.read(&mut buf).await?;
+    let n = socket.read(&mut buf).await?;
 
-    let command: &str = std::str::from_utf8(&buf[..n])?;
-    match command {
-        "SEND_TASK" => {
-            let task = Task {
-                id: uuid::Uuid::new_v4().to_string(),
-                data: vec![],
-            };
-            master_node.tasks.lock().unwrap().push(task.clone());
-            let response = serde_json::to_vec(&task)?;
-            tls_stream.write_all(&response).await?;
+    let received_token = std::str::from_utf8(&buf[..n])?.trim().to_string();
+    if received_token == token {
+        println!("Client authenticated with correct token");
+        {
+            // Node zum Netzwerk hinzufügen
+            master_node.connected_nodes.lock().unwrap().insert(addr.clone(), addr.clone());
         }
-        "GET_TASK" => {
-            let tasks = master_node.tasks.lock().unwrap().clone();
-            let response = serde_json::to_vec(&tasks)?;
-            tls_stream.write_all(&response).await?;
+
+        loop {
+            let mut buf = [0; 1024];
+            let n = socket.read(&mut buf).await?;
+            if n == 0 {
+                println!("Client disconnected");
+                break;
+            }
+
+            // Nachricht empfangen und verarbeiten
+            let request: NodeMessage = serde_json::from_slice(&buf[..n])?;
+            match request {
+                NodeMessage::GetConnectedNodes => {
+                    let connected_nodes = master_node
+                        .connected_nodes
+                        .lock()
+                        .unwrap()
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<String>>();
+                    let response = NodeMessage::ConnectedNodes(connected_nodes);
+                    let response_data = serde_json::to_vec(&response)?;
+                    socket.write_all(&response_data).await?;
+                    println!("Sent connected nodes list to client");
+                }
+                _ => println!("Unknown request"),
+            }
         }
-        "GET_NODES" => {
-            let nodes = master_node.connected_nodes.lock().unwrap().keys().cloned().collect::<Vec<_>>();
-            let response = serde_json::to_vec(&nodes)?;
-            tls_stream.write_all(&response).await?;
-        }
-        _ => eprintln!("Unknown command: {}", command),
+
+        // Bei Trennung den Node entfernen
+        master_node.connected_nodes.lock().unwrap().remove(&addr);
+    } else {
+        println!("Client provided an invalid token");
+        socket.write_all(b"Invalid token").await?;
     }
 
     Ok(())
 }
 
-fn load_tls_server_config(cert_path: &str, key_path: &str) -> Result<Arc<ServerConfig>, Box<dyn Error + Send + Sync>> {
-    let cert_file = &mut BufReader::new(File::open(cert_path)?);
-    let certs = certs(cert_file)?.into_iter().map(Certificate).collect();
-
-    let key_file = &mut BufReader::new(File::open(key_path)?);
-    let mut keys: Vec<PrivateKey> = pkcs8_private_keys(key_file)?.into_iter().map(PrivateKey).collect();
-
-    let config = ServerConfig::builder()
-        .with_safe_defaults()
-        .with_no_client_auth()
-        .with_single_cert(certs, keys.remove(0))?;
-
-    Ok(Arc::new(config))
-}
-
-
-fn check_and_generate_certs(cert_path: &str, key_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if !Path::new(cert_path).exists() || !Path::new(key_path).exists() {
-        println!("Certificates not found, generating new ones...");
-        std::fs::create_dir_all("certs")?;
-
-        let output = Command::new("openssl")
-            .args([
-                "req", "-x509", "-newkey", "rsa:4096", "-keyout", key_path, "-out", cert_path,
-                "-days", "365", "-nodes", "-subj", "/CN=localhost"
-            ])
-            .output()?;
-
-        if !output.status.success() {
-            return Err(format!("Failed to generate certificates: {:?}", output.stderr).into());
-        }
-        println!("Certificates generated successfully.");
-    }
-    Ok(())
+fn generate_token() -> String {
+    Uuid::new_v4().to_string()
 }
