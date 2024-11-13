@@ -109,7 +109,3 @@ Ensure each node uses the same `join.json` for authentication with the master no
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-This `README.md` provides instructions for setting up and running CPCluster, an overview of its functionality, and details on key workflows within the network. Adjust the repository URL if needed.
