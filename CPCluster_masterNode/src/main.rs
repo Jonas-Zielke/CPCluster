@@ -1,12 +1,14 @@
-use cpcluster_common::{JoinInfo, NodeMessage};
+use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
     fs,
     sync::{Arc, Mutex},
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::{rustls, TlsAcceptor};
+use rcgen::generate_simple_self_signed;
 use uuid::Uuid;
 
 const MIN_PORT: u16 = 55001;
@@ -20,7 +22,7 @@ struct MasterNode {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let token = generate_token();
+    let token = generateToken();
     let ip = "127.0.0.1".to_string();
     let port = "55000".to_string();
 
@@ -35,6 +37,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let listener = TcpListener::bind(format!("{}:{}", ip, port)).await?;
     println!("Master Node listening on {}:{}", ip, port);
 
+    // prepare TLS acceptor using a self-signed certificate
+    let tlsConfig = generateTlsConfig()?;
+    let tlsAcceptor = TlsAcceptor::from(Arc::new(tlsConfig));
+
     let masterNode = Arc::new(MasterNode {
         connectedNodes: Arc::new(Mutex::new(HashMap::new())),
         availablePorts: Arc::new(Mutex::new((MIN_PORT..=MAX_PORT).collect())),
@@ -45,20 +51,34 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let masterNode = Arc::clone(&masterNode);
         let token = token.clone();
 
+        let acceptor = tlsAcceptor.clone();
         tokio::spawn(async move {
-            if let Err(e) = handleConnection(stream, masterNode, token, addr.to_string()).await {
+            let useTls = !isLocalIp(&addr.ip().to_string());
+            if useTls {
+                match acceptor.accept(stream).await {
+                    Ok(tlsStream) => {
+                        if let Err(e) = handleConnection(tlsStream, masterNode, token, addr.to_string()).await {
+                            eprintln!("TLS connection error: {:?}", e);
+                        }
+                    }
+                    Err(e) => eprintln!("TLS accept failed: {:?}", e),
+                }
+            } else if let Err(e) = handleConnection(stream, masterNode, token, addr.to_string()).await {
                 eprintln!("Connection error: {:?}", e);
             }
         });
     }
 }
 
-async fn handleConnection(
-    mut socket: TcpStream,
+async fn handleConnection<S>(
+    mut socket: S,
     masterNode: Arc<MasterNode>,
     token: String,
     addr: String,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<(), Box<dyn Error + Send + Sync>>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let mut buf = [0; 1024];
     let n = socket.read(&mut buf).await?;
 
@@ -147,7 +167,7 @@ async fn handleConnection(
     Ok(())
 }
 
-fn generate_token() -> String {
+fn generateToken() -> String {
     Uuid::new_v4().to_string()
 }
 
@@ -164,4 +184,15 @@ fn releasePort(masterNode: &MasterNode, addr: String) {
     if let Some(port) = addr.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()) {
         ports.insert(port);
     }
+}
+
+fn generateTlsConfig() -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sync>> {
+    let cert = generate_simple_self_signed(vec!["localhost".to_string()])?;
+    let cert_der = cert.serialize_der()?;
+    let key_der = cert.serialize_private_key_der();
+    let config = rustls::ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(vec![rustls::Certificate(cert_der)], rustls::PrivateKey(key_der))?;
+    Ok(config)
 }

@@ -6,8 +6,9 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.23.4"
-rustls = "0.20.9"
+rustls = { version = "0.20.9", features = ["dangerous_configuration"] }
 rustls-pemfile = "0.2.1"  # Fügen Sie diese Zeile hinzu
+rcgen = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.0", features = ["v4"] }

@@ -9,6 +9,7 @@ CPCluster is a distributed network of nodes that communicate with each other for
 - **Direct Node-to-Node Communication**: Nodes establish direct communication channels after being connected, allowing efficient data transfer with minimal latency.
 - **Token-based Authentication**: Nodes authenticate with the master using a unique token stored in a `join.json` file.
 - **Disconnect Handling**: The master node manages disconnections and releases ports when nodes leave the network.
+- **Optional TLS Encryption**: When nodes communicate across the internet, connections to the master node are automatically upgraded to TLS using `tokio-rustls`.
 
 ## Project Structure
 
