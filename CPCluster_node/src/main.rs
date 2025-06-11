@@ -3,7 +3,7 @@ use cpcluster_common::config::Config;
 use std::{error::Error, fs, sync::Arc};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    net::TcpStream,
+    net::{TcpListener, TcpStream},
 };
 use tokio_rustls::{rustls, TlsConnector};
 
@@ -34,11 +34,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = Config::load("config.json").unwrap_or_default();
 
     let mut stream: Option<Box<dyn ReadWrite + Unpin + Send>> = None;
+    let mut self_addr: Option<String> = None;
     for addr in &config.master_addresses {
         match connect(addr, isLocalIp(&joinInfo.ip), &joinInfo.ip).await {
-            Ok(s) => {
+            Ok((s, local)) => {
                 println!("Connected to Master Node at {}", addr);
                 stream = Some(s);
+                self_addr = Some(local);
                 break;
             }
             Err(e) => {
@@ -54,6 +56,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             return Ok(());
         }
     };
+    let self_addr = self_addr.unwrap_or_default();
 
     // Send only the token for authentication
     stream.write_all(joinInfo.token.as_bytes()).await?;
@@ -83,6 +86,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let response: NodeMessage = serde_json::from_slice(&buf[..n])?;
     if let NodeMessage::ConnectedNodes(nodes) = response {
         println!("Currently connected nodes in the network: {:?}", nodes);
+        if let Some(target) = nodes.into_iter().find(|n| *n != self_addr) {
+            sendMessage(&mut stream, NodeMessage::RequestConnection(target.clone())).await?;
+
+            let n = stream.read(&mut buf).await?;
+            if n == 0 {
+                println!("Connection closed by Master Node");
+                return Ok(());
+            }
+
+            if let NodeMessage::ConnectionInfo(addr, port) = serde_json::from_slice(&buf[..n])? {
+                handle_direct_connection(addr, port).await?;
+            }
+        }
     }
 
     // Periodic heartbeat loop
@@ -118,12 +134,14 @@ async fn connect(
     addr: &str,
     local: bool,
     ip: &str,
-) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
+) -> Result<(Box<dyn ReadWrite + Unpin + Send>, String), Box<dyn Error + Send + Sync>> {
     if local {
         let tcp = TcpStream::connect(addr).await?;
-        Ok(Box::new(tcp))
+        let local_addr = tcp.local_addr()?.to_string();
+        Ok((Box::new(tcp), local_addr))
     } else {
         let tcp = TcpStream::connect(addr).await?;
+        let local_addr = tcp.local_addr()?.to_string();
         let config = rustls::ClientConfig::builder()
             .with_safe_defaults()
             .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
@@ -131,6 +149,73 @@ async fn connect(
         let connector = TlsConnector::from(Arc::new(config));
         let serverName = rustls::ServerName::try_from(ip)?;
         let tls = connector.connect(serverName, tcp).await?;
+        Ok((Box::new(tls), local_addr))
+    }
+}
+
+async fn connect_peer(
+    addr: &str,
+    port: u16,
+) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
+    let target = format!("{}:{}", addr, port);
+    if isLocalIp(addr) {
+        let tcp = TcpStream::connect(target).await?;
+        Ok(Box::new(tcp))
+    } else {
+        let tcp = TcpStream::connect(target).await?;
+        let config = rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
+            .with_no_client_auth();
+        let connector = TlsConnector::from(Arc::new(config));
+        let serverName = rustls::ServerName::try_from(addr)?;
+        let tls = connector.connect(serverName, tcp).await?;
         Ok(Box::new(tls))
     }
+}
+
+async fn send_node_message<S>(
+    stream: &mut S,
+    msg: NodeMessage,
+) -> Result<(), Box<dyn Error + Send + Sync>>
+where
+    S: AsyncWrite + Unpin,
+{
+    let msg_data = serde_json::to_vec(&msg)?;
+    stream.write_all(&msg_data).await?;
+    Ok(())
+}
+
+async fn handle_direct_connection(addr: String, port: u16) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+    println!("Listening for node connections on {}", port);
+
+    tokio::spawn(async move {
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let mut buf = vec![0; 1024];
+            if let Ok(n) = socket.read(&mut buf).await {
+                if n > 0 {
+                    if let Ok(NodeMessage::DirectMessage(msg)) = serde_json::from_slice(&buf[..n]) {
+                        if msg == "ping" {
+                            let _ = send_node_message(&mut socket, NodeMessage::DirectMessage("pong".into())).await;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let ip = addr.split(':').next().unwrap_or(&addr);
+    let mut stream = connect_peer(ip, port).await?;
+    send_node_message(&mut stream, NodeMessage::DirectMessage("ping".into())).await?;
+    let mut buf = vec![0; 1024];
+    let n = stream.read(&mut buf).await?;
+    if n > 0 {
+        if let NodeMessage::DirectMessage(resp) = serde_json::from_slice(&buf[..n])? {
+            if resp == "pong" {
+                println!("Received pong from {}", addr);
+            }
+        }
+    }
+    Ok(())
 }

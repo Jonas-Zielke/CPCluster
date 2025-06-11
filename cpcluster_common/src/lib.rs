@@ -14,6 +14,7 @@ pub struct JoinInfo {
 pub enum NodeMessage {
     RequestConnection(String),
     ConnectionInfo(String, u16),
+    DirectMessage(String),
     GetConnectedNodes,
     ConnectedNodes(Vec<String>),
     Disconnect,

@@ -19,6 +19,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 struct NodeInfo {
     addr: String,
     last_heartbeat: u64,
+    assigned_port: Option<u16>,
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +27,7 @@ struct MasterNode {
     connectedNodes: Arc<Mutex<HashMap<String, NodeInfo>>>, // speichert Node-ID und Infos
     availablePorts: Arc<Mutex<HashSet<u16>>>,              // verwaltet verfügbare Ports
     failover_timeout_ms: u64,
+    node_channels: Arc<Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<NodeMessage>>>>,
 }
 
 #[tokio::main]
@@ -62,6 +64,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         connectedNodes: Arc::new(Mutex::new(HashMap::new())),
         availablePorts: Arc::new(Mutex::new((config.min_port..=config.max_port).collect())),
         failover_timeout_ms: config.failover_timeout_ms,
+        node_channels: Arc::new(Mutex::new(HashMap::new())),
     });
     loadState(&masterNode);
 
@@ -130,25 +133,37 @@ where
                 NodeInfo {
                     addr: addr.clone(),
                     last_heartbeat: now_ms(),
+                    assigned_port: None,
                 },
             );
         saveState(&masterNode);
 
+        // Channel to deliver messages to this node
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<NodeMessage>();
+        masterNode
+            .node_channels
+            .lock()
+            .unwrap()
+            .insert(addr.clone(), tx);
+
         loop {
             let mut buf = [0; 1024];
-            let n = socket.read(&mut buf).await?;
-            if n == 0 {
-                println!("Client disconnected");
-                break;
-            }
+            let read_fut = socket.read(&mut buf);
+            tokio::select! {
+                result = read_fut => {
+                    let n = result?;
+                    if n == 0 {
+                        println!("Client disconnected");
+                        break;
+                    }
 
-            let request: NodeMessage = serde_json::from_slice(&buf[..n])?;
-            match request {
-                NodeMessage::GetConnectedNodes => {
-                    // Sende die Liste aller verbundenen Nodes
-                    let connectedNodes = masterNode
-                        .connectedNodes
-                        .lock()
+                    let request: NodeMessage = serde_json::from_slice(&buf[..n])?;
+                    match request {
+                        NodeMessage::GetConnectedNodes => {
+                            // Sende die Liste aller verbundenen Nodes
+                            let connectedNodes = masterNode
+                                .connectedNodes
+                                .lock()
                         .unwrap()
                         .keys()
                         .cloned()
@@ -159,53 +174,70 @@ where
                     socket.write_all(&response_data).await?;
                     println!("Sent connected nodes list to client");
                 }
-                NodeMessage::RequestConnection(target_id) => {
-                    // Prüfe, ob ein freier Port verfügbar ist
-                    if let Some(port) = allocatePort(&masterNode) {
-                        // Hole die Adresse der Ziel-Node
-                        let target_addr = masterNode
-                            .connectedNodes
-                            .lock()
-                            .unwrap()
-                            .get(&target_id)
-                            .cloned()
-                            .map(|n| n.addr);
+                        NodeMessage::RequestConnection(target_id) => {
+                            if let Some(port) = allocatePort(&masterNode) {
+                                let target_addr = {
+                                    let mut nodes = masterNode.connectedNodes.lock().unwrap();
+                                    let target_addr = nodes.get(&target_id).cloned().map(|n| n.addr.clone());
+                                    if let Some(_) = target_addr {
+                                        if let Some(n) = nodes.get_mut(&addr) {
+                                            n.assigned_port = Some(port);
+                                        }
+                                        if let Some(n) = nodes.get_mut(&target_id) {
+                                            n.assigned_port = Some(port);
+                                        }
+                                    }
+                                    target_addr
+                                };
 
-                        if let Some(target_addr) = target_addr {
-                            // Sende die Verbindungsinformation an die anfragende Node
-                            let response = NodeMessage::ConnectionInfo(target_addr, port);
-                            let response_data = serde_json::to_vec(&response)?;
-                            socket.write_all(&response_data).await?;
-                            println!("Connection info sent to {} on port {}", target_id, port);
-                        } else {
-                            println!("Target Node not found");
+                                if let Some(target_addr) = target_addr {
+                                    let response = NodeMessage::ConnectionInfo(target_addr.clone(), port);
+                                    let response_data = serde_json::to_vec(&response)?;
+                                    socket.write_all(&response_data).await?;
+
+                                    if let Some(tx) = masterNode.node_channels.lock().unwrap().get(&target_id) {
+                                        let _ = tx.send(NodeMessage::ConnectionInfo(addr.clone(), port));
+                                    }
+
+                                    println!("Connection info sent to {} on port {}", target_id, port);
+                                } else {
+                                    println!("Target Node not found");
+                                    releasePort(&masterNode, addr.clone());
+                                }
+                            } else {
+                                println!("No ports available");
+                            }
                         }
-                    } else {
-                        println!("No ports available");
+                        NodeMessage::Disconnect => {
+                            // Entferne die Node und gebe den Port frei
+                            println!("Node disconnected and port released.");
+                            releasePort(&masterNode, addr.clone());
+                            masterNode.connectedNodes.lock().unwrap().remove(&addr);
+                            masterNode.node_channels.lock().unwrap().remove(&addr);
+                            saveState(&masterNode);
+                            break;
+                        }
+                        NodeMessage::Heartbeat => {
+                            masterNode
+                                .connectedNodes
+                                .lock()
+                                .unwrap()
+                                .entry(addr.clone())
+                                .and_modify(|n| n.last_heartbeat = now_ms());
+                        }
+                        _ => println!("Unknown request"),
                     }
                 }
-                NodeMessage::Disconnect => {
-                    // Entferne die Node und gebe den Port frei
-                    println!("Node disconnected and port released.");
-                    releasePort(&masterNode, addr.clone());
-                    masterNode.connectedNodes.lock().unwrap().remove(&addr);
-                    saveState(&masterNode);
-                    break;
+                Some(msg) = rx.recv() => {
+                    let data = serde_json::to_vec(&msg)?;
+                    socket.write_all(&data).await?;
                 }
-                NodeMessage::Heartbeat => {
-                    masterNode
-                        .connectedNodes
-                        .lock()
-                        .unwrap()
-                        .entry(addr.clone())
-                        .and_modify(|n| n.last_heartbeat = now_ms());
-                }
-                _ => println!("Unknown request"),
             }
         }
 
         // Entferne die Node aus der Liste der verbundenen Nodes
         masterNode.connectedNodes.lock().unwrap().remove(&addr);
+        masterNode.node_channels.lock().unwrap().remove(&addr);
         saveState(&masterNode);
     } else {
         println!("Client provided an invalid token {}", received_token);
@@ -220,18 +252,36 @@ fn generateToken() -> String {
 }
 
 fn allocatePort(masterNode: &MasterNode) -> Option<u16> {
-    let mut ports = masterNode.availablePorts.lock().unwrap();
-    ports.iter().cloned().next().map(|port| {
-        ports.remove(&port);
+    let port = {
+        let mut ports = masterNode.availablePorts.lock().unwrap();
+        ports.iter().cloned().next().map(|p| {
+            ports.remove(&p);
+            p
+        })
+    };
+    if port.is_some() {
         saveState(masterNode);
-        port
-    })
+    }
+    port
 }
 
 fn releasePort(masterNode: &MasterNode, addr: String) {
-    let mut ports = masterNode.availablePorts.lock().unwrap();
-    if let Some(port) = addr.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()) {
-        ports.insert(port);
+    let port = {
+        let mut nodes = masterNode.connectedNodes.lock().unwrap();
+        if let Some(info) = nodes.get_mut(&addr) {
+            let p = info.assigned_port;
+            info.assigned_port = None;
+            p
+        } else {
+            None
+        }
+    };
+
+    if let Some(port) = port {
+        {
+            let mut ports = masterNode.availablePorts.lock().unwrap();
+            ports.insert(port);
+        }
         saveState(masterNode);
     }
 }
@@ -257,8 +307,8 @@ fn cleanupDeadNodes(master: &MasterNode) {
     }
     for addr in stale {
         println!("Node {} timed out", addr);
+        releasePort(master, addr.clone());
         master.connectedNodes.lock().unwrap().remove(&addr);
-        releasePort(master, addr);
     }
     saveState(master);
 }
@@ -296,5 +346,37 @@ fn saveState(master: &MasterNode) {
     };
     if let Ok(data) = serde_json::to_string_pretty(&state) {
         let _ = fs::write("master_state.json", data);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn test_master() -> MasterNode {
+        MasterNode {
+            connectedNodes: Arc::new(Mutex::new(HashMap::new())),
+            availablePorts: Arc::new(Mutex::new(HashSet::from([6000u16]))),
+            failover_timeout_ms: 1000,
+            node_channels: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    #[test]
+    fn release_port_returns_it_to_pool() {
+        let master = test_master();
+        master.connectedNodes.lock().unwrap().insert(
+            "node".into(),
+            NodeInfo { addr: "node".into(), last_heartbeat: 0, assigned_port: Some(6000) },
+        );
+
+        // port is removed from available pool
+        allocatePort(&master);
+        assert!(master.availablePorts.lock().unwrap().is_empty());
+
+        releasePort(&master, "node".into());
+        assert!(master.availablePorts.lock().unwrap().contains(&6000));
+        assert!(master.connectedNodes.lock().unwrap().get("node").unwrap().assigned_port.is_none());
     }
 }
