@@ -4,3 +4,4 @@ members = [
     "CPCluster_node",
     "cpcluster_common"
 ]
+resolver = "2"

@@ -3,8 +3,30 @@
 set -e
 
 # Install system packages
-sudo apt-get update
-sudo apt-get install -y curl git build-essential pkg-config libssl-dev
+# Detect package manager and install system packages if possible
+if command -v apt-get >/dev/null 2>&1; then
+    pkg_cmd="apt-get"
+    install_cmd="install -y"
+elif command -v dnf >/dev/null 2>&1; then
+    pkg_cmd="dnf"
+    install_cmd="install -y"
+elif command -v yum >/dev/null 2>&1; then
+    pkg_cmd="yum"
+    install_cmd="install -y"
+else
+    echo "No supported package manager found. Please install curl, git, build-essential, pkg-config and libssl-dev manually." >&2
+    pkg_cmd=""
+fi
+
+if [ -n "$pkg_cmd" ]; then
+    if [ "$(id -u)" -ne 0 ]; then
+        sudo $pkg_cmd update
+        sudo $pkg_cmd $install_cmd curl git build-essential pkg-config libssl-dev
+    else
+        $pkg_cmd update
+        $pkg_cmd $install_cmd curl git build-essential pkg-config libssl-dev
+    fi
+fi
 
 # Install Rust if not already installed
 if ! command -v cargo >/dev/null 2>&1; then
