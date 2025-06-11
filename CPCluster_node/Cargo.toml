@@ -22,3 +22,4 @@ serde_json = "1.0"
 
 # UUID für eindeutige Aufgaben-IDs
 uuid = { version = "1", features = ["v4"] }
+cpcluster_common = { path = "../cpcluster_common" }
