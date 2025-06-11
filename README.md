@@ -9,11 +9,16 @@ CPCluster is a distributed network of nodes that communicate with each other for
 - **Direct Node-to-Node Communication**: Nodes establish direct communication channels after being connected, allowing efficient data transfer with minimal latency.
 - **Token-based Authentication**: Nodes authenticate with the master using a unique token stored in a `join.json` file.
 - **Disconnect Handling**: The master node manages disconnections and releases ports when nodes leave the network.
+- **Heartbeat Monitoring**: Nodes send periodic heartbeat messages so the master can remove unresponsive nodes.
+- **Task Replication**: Tasks are replicated across multiple nodes and considered complete when any node returns a result.
+- **Standby Master Example**: A lightweight standby master demonstrates how failover could work.
 
 ## Project Structure
 
-- **Master Node** (`CPCluster_masterNode`): Acts as the connection manager, handles authentication, manages available ports, and facilitates direct connections between nodes.
-- **Normal Node** (`CPCluster_node`): Connects to the master node, requests connections to other nodes, and handles direct communication for task exchange.
+- **Master Node** (`CPCluster_masterNode`): Connection manager that distributes tasks and monitors node heartbeats.
+- **Normal Node** (`CPCluster_node`): Connects to the master, processes replicated tasks, and sends periodic heartbeats.
+- **Protocol Library** (`cpcluster_protocol`): Shared definitions such as `NodeMessage` and `JoinInfo` used by all crates.
+- **Standby Master** (`CPCluster_standbyMaster`): Example of a secondary master that can take over if the primary fails.
 
 ## Getting Started
 

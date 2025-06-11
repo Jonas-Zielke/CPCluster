@@ -1,5 +1,5 @@
-use std::{collections::{HashMap, HashSet}, error::Error, fs, sync::{Arc, Mutex}};
-use serde::{Deserialize, Serialize};
+use std::{collections::{HashMap, HashSet}, error::Error, fs, sync::{Arc, Mutex}, time::Instant};
+use cpcluster_protocol::{JoinInfo, NodeMessage};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
@@ -7,27 +7,13 @@ use uuid::Uuid;
 const MIN_PORT: u16 = 55001;
 const MAX_PORT: u16 = 55999;
 
-#[derive(Serialize, Deserialize)]
-struct JoinInfo {
-    token: String,
-    ip: String,
-    port: String,
-}
-
-#[derive(Debug, Clone)]
 struct MasterNode {
     connected_nodes: Arc<Mutex<HashMap<String, String>>>, // speichert Node-ID und IP-Adresse
     available_ports: Arc<Mutex<HashSet<u16>>>,            // verwaltet verfügbare Ports
+    last_seen: Arc<Mutex<HashMap<String, Instant>>>,      // Zeitpunkt des letzten Heartbeats
+    tasks: Arc<Mutex<HashMap<String, bool>>>,             // Task-ID -> erledigt
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-enum NodeMessage {
-    RequestConnection(String),   // Anfrage, sich mit einer anderen Node zu verbinden
-    ConnectionInfo(String, u16), // Verbindungsinfo: Ziel-IP und Port
-    GetConnectedNodes,           // Anforderung für die Liste verbundener Nodes
-    ConnectedNodes(Vec<String>), // Antwort mit der Liste verbundener Nodes
-    Disconnect,                  // Nachricht zum Beenden der Verbindung
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -45,6 +31,36 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let master_node = Arc::new(MasterNode {
         connected_nodes: Arc::new(Mutex::new(HashMap::new())),
         available_ports: Arc::new(Mutex::new((MIN_PORT..=MAX_PORT).collect())),
+        last_seen: Arc::new(Mutex::new(HashMap::new())),
+        tasks: Arc::new(Mutex::new([
+            ("task-1".to_string(), false),
+            ("task-2".to_string(), false),
+        ]
+        .iter()
+        .cloned()
+        .collect())),
+    });
+
+    // Task to monitor heartbeats and remove stale nodes
+    let monitor_master = Arc::clone(&master_node);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            let mut remove = Vec::new();
+            {
+                let last_seen = monitor_master.last_seen.lock().unwrap();
+                for (addr, ts) in last_seen.iter() {
+                    if ts.elapsed() > tokio::time::Duration::from_secs(15) {
+                        remove.push(addr.clone());
+                    }
+                }
+            }
+            for addr in remove {
+                monitor_master.connected_nodes.lock().unwrap().remove(&addr);
+                monitor_master.last_seen.lock().unwrap().remove(&addr);
+                println!("{} removed due to missed heartbeat", addr);
+            }
+        }
     });
 
     loop {
@@ -80,6 +96,24 @@ async fn handle_connection(
 
         // Füge die Node zur verbundenen Liste hinzu
         master_node.connected_nodes.lock().unwrap().insert(addr.clone(), addr.clone());
+        master_node.last_seen.lock().unwrap().insert(addr.clone(), Instant::now());
+
+        // Repliziere alle offenen Tasks an die neue Node
+        let tasks_to_send: Vec<String> = {
+            master_node
+                .tasks
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, done)| !**done)
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        for id in tasks_to_send {
+            let msg = NodeMessage::AssignTask(id.clone(), "work".to_string());
+            let data = serde_json::to_vec(&msg)?;
+            socket.write_all(&data).await?;
+        }
 
         loop {
             let mut buf = [0; 1024];
@@ -130,6 +164,18 @@ async fn handle_connection(
                     println!("Node disconnected and port released.");
                     release_port(&master_node, addr.clone());
                     break;
+                }
+                NodeMessage::Heartbeat => {
+                    master_node.last_seen.lock().unwrap().insert(addr.clone(), Instant::now());
+                }
+                NodeMessage::TaskResult(task_id, result) => {
+                    println!("Result for {} from {}: {}", task_id, addr, result);
+                    if let Some(entry) = master_node.tasks.lock().unwrap().get_mut(&task_id) {
+                        if !*entry {
+                            *entry = true;
+                            println!("Task {} marked complete", task_id);
+                        }
+                    }
                 }
                 _ => println!("Unknown request"),
             }

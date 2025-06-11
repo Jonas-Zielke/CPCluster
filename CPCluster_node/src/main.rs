@@ -1,22 +1,7 @@
-use std::{error::Error, fs};
-use serde::{Deserialize, Serialize};
-use tokio::{net::TcpStream, io::{AsyncReadExt, AsyncWriteExt}};
+use std::{error::Error, fs, sync::Arc};
+use cpcluster_protocol::{JoinInfo, NodeMessage};
+use tokio::{net::{TcpStream, tcp::OwnedWriteHalf}, io::{AsyncReadExt, AsyncWriteExt}};
 
-#[derive(Serialize, Deserialize)]
-struct JoinInfo {
-    token: String,
-    ip: String,
-    port: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-enum NodeMessage {
-    RequestConnection(String),
-    ConnectionInfo(String, u16),
-    GetConnectedNodes,
-    ConnectedNodes(Vec<String>),
-    Disconnect,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -57,12 +42,38 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("Currently connected nodes in the network: {:?}", nodes);
     }
 
-    // Here you can proceed with additional actions, such as requesting a connection to another node.
+    let (read_half, write_half) = master_stream.into_split();
+    let writer = Arc::new(tokio::sync::Mutex::new(write_half));
 
-    // Disconnect from the Master Node
-    let disconnect_msg = NodeMessage::Disconnect;
-    send_message(&mut master_stream, disconnect_msg).await?;
-    println!("Disconnected from Master Node");
+    // Heartbeat loop
+    let hb_writer = Arc::clone(&writer);
+    tokio::spawn(async move {
+        loop {
+            if send_message_generic(&hb_writer, NodeMessage::Heartbeat).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        }
+    });
+
+    let mut reader = read_half;
+    loop {
+        let mut buf = vec![0; 1024];
+        let n = reader.read(&mut buf).await?;
+        if n == 0 {
+            println!("Master disconnected");
+            break;
+        }
+        let msg: NodeMessage = serde_json::from_slice(&buf[..n])?;
+        match msg {
+            NodeMessage::AssignTask(id, data) => {
+                println!("Processing task {} with data {}", id, data);
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                send_message_generic(&writer, NodeMessage::TaskResult(id, "done".to_string())).await?;
+            }
+            _ => {}
+        }
+    }
 
     Ok(())
 }
@@ -71,5 +82,12 @@ async fn send_message(stream: &mut TcpStream, msg: NodeMessage) -> Result<(), Bo
     let msg_data = serde_json::to_vec(&msg)?;
     stream.write_all(&msg_data).await?;
     println!("Sent message to Master Node: {:?}", msg);
+    Ok(())
+}
+
+async fn send_message_generic(writer: &tokio::sync::Mutex<OwnedWriteHalf>, msg: NodeMessage) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let mut w = writer.lock().await;
+    let data = serde_json::to_vec(&msg)?;
+    w.write_all(&data).await?;
     Ok(())
 }
