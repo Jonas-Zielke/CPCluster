@@ -1,0 +1,6 @@
+{
+  "min_port": 55001,
+  "max_port": 55999,
+  "failover_timeout_ms": 5000,
+  "master_addresses": ["127.0.0.1:55000"]
+}

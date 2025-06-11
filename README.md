@@ -5,11 +5,13 @@ CPCluster is a distributed network of nodes that communicate with each other for
 ## Features
 
 - **Centralized Connection Management**: The master node manages node connections and assigns direct ports for inter-node communication.
-- **Dynamic Port Assignment**: Nodes request connections to other nodes through the master, which assigns available ports in the range 55001-55999.
+- **Dynamic Port Assignment**: Nodes request connections to other nodes through the master, which assigns available ports in the configurable range defined in `config.json`.
 - **Direct Node-to-Node Communication**: Nodes establish direct communication channels after being connected, allowing efficient data transfer with minimal latency.
 - **Token-based Authentication**: Nodes authenticate with the master using a unique token stored in a `join.json` file.
-- **Disconnect Handling**: The master node manages disconnections and releases ports when nodes leave the network.
-- **Optional TLS Encryption**: When nodes communicate across the internet, connections to the master node are automatically upgraded to TLS using `tokio-rustls`.
+ - **Disconnect Handling**: The master node manages disconnections and releases ports when nodes leave the network.
+ - **Optional TLS Encryption**: When nodes communicate across the internet, connections to the master node are automatically upgraded to TLS using `tokio-rustls`.
+ - **Redundant Masters**: Clients can specify multiple master addresses and automatically fail over if one becomes unavailable.
+ - **Heartbeat Monitoring**: Nodes periodically send heartbeats and the master removes entries if a node stops responding.
 
 ## Project Structure
 
@@ -58,6 +60,7 @@ CPCluster is a distributed network of nodes that communicate with each other for
 
 1. **Generate join.json**: When the master node is started, it creates a `join.json` file with a unique token for network access.
 2. **Copy `join.json` to nodes**: Each node must have a `join.json` file identical to the one in the master node directory. Copy this file to the `CPCluster_node` directory for each node that will join the network.
+3. **Edit `config.json`**: Both master and nodes read runtime options from `config.json`. You can configure the port range, failover timeout and a list of master node addresses for redundancy.
 
 ### Running the Project
 
