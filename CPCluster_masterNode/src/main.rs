@@ -73,6 +73,11 @@ async fn handle_connection(
     if received_token == token {
         println!("Client authenticated with correct token");
 
+        // Inform the client that authentication succeeded so it can
+        // continue with the protocol. Without this message the client
+        // would block waiting for a response.
+        socket.write_all(b"OK").await?;
+
         // Füge die Node zur verbundenen Liste hinzu
         master_node.connected_nodes.lock().unwrap().insert(addr.clone(), addr.clone());
 
