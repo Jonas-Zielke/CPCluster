@@ -57,6 +57,10 @@ CPCluster is a distributed network of nodes that communicate with each other for
 
 1. **Generate join.json**: When the master node is started, it creates a `join.json` file with a unique token for network access.
 2. **Copy `join.json` to nodes**: Each node must have a `join.json` file identical to the one in the master node directory. Copy this file to the `CPCluster_node` directory for each node that will join the network.
+3. **Certificates**: TLS certificates are loaded from a `certs` directory inside each crate. If `certs/cert.pem` and `certs/key.pem` do not exist, generate a self-signed pair, for example with:
+   ```bash
+   openssl req -x509 -newkey rsa:4096 -keyout certs/key.pem -out certs/cert.pem -days 365 -nodes -subj "/CN=localhost"
+   ```
 
 ### Running the Project
 

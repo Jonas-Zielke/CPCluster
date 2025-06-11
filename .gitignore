@@ -3,6 +3,8 @@ target/
 .idea/
 CPCluster_masterNode/join.json
 CPCluster_node/join.json
+CPCluster_masterNode/certs/
+CPCluster_node/certs/
 Cargo.lock
 **/*.rs.bk
 *.pdb

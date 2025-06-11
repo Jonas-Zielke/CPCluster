@@ -1,12 +1,24 @@
-use std::{collections::{HashMap, HashSet}, error::Error, fs, sync::{Arc, Mutex}};
+use rustls::{Certificate, PrivateKey, ServerConfig};
+use rustls_pemfile::{certs, pkcs8_private_keys};
 use serde::{Deserialize, Serialize};
-use tokio::net::{TcpListener, TcpStream};
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::Arc as StdArc;
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    fs,
+    sync::{Arc, Mutex},
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::{server::TlsStream, TlsAcceptor};
 use uuid::Uuid;
 
 const MIN_PORT: u16 = 55001;
 const MAX_PORT: u16 = 55999;
 
+// Informationen, die ein Node benötigt, um dem Cluster beizutreten
 #[derive(Serialize, Deserialize)]
 struct JoinInfo {
     token: String,
@@ -14,28 +26,49 @@ struct JoinInfo {
     port: String,
 }
 
+// Zentrale Verwaltungsstruktur des Masters
 #[derive(Debug, Clone)]
 struct MasterNode {
-    connected_nodes: Arc<Mutex<HashMap<String, String>>>, // speichert Node-ID und IP-Adresse
-    available_ports: Arc<Mutex<HashSet<u16>>>,            // verwaltet verfügbare Ports
+    // speichert Node-ID und IP-Adresse
+    connected_nodes: Arc<Mutex<HashMap<String, String>>>,
+    // verwaltet verfügbare Ports
+    available_ports: Arc<Mutex<HashSet<u16>>>,
 }
 
+// Nachrichten, die zwischen Node und Master ausgetauscht werden
 #[derive(Serialize, Deserialize, Debug)]
 enum NodeMessage {
-    RequestConnection(String),   // Anfrage, sich mit einer anderen Node zu verbinden
-    ConnectionInfo(String, u16), // Verbindungsinfo: Ziel-IP und Port
-    GetConnectedNodes,           // Anforderung für die Liste verbundener Nodes
-    ConnectedNodes(Vec<String>), // Antwort mit der Liste verbundener Nodes
-    Disconnect,                  // Nachricht zum Beenden der Verbindung
+    // Anfrage, sich mit einer anderen Node zu verbinden
+    RequestConnection(String),
+    // Verbindungsinfo: Ziel-IP und Port
+    ConnectionInfo(String, u16),
+    // Anforderung für die Liste verbundener Nodes
+    GetConnectedNodes,
+    // Antwort mit der Liste verbundener Nodes
+    ConnectedNodes(Vec<String>),
+    // Nachricht zum Beenden der Verbindung
+    Disconnect,
 }
 
 #[tokio::main]
+/// Einstiegspunkt des Master Nodes. Erstellt das Join-Token, richtet TLS ein und
+/// wartet auf eingehende Verbindungen von Nodes.
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let token = generate_token();
     let ip = "127.0.0.1".to_string();
     let port = "55000".to_string();
 
-    let join_info = JoinInfo { token: token.clone(), ip: ip.clone(), port: port.clone() };
+    let cert_path = "certs/cert.pem";
+    let key_path = "certs/key.pem";
+
+    let tls_config = load_tls_config(cert_path, key_path)?;
+    let acceptor = TlsAcceptor::from(tls_config);
+
+    let join_info = JoinInfo {
+        token: token.clone(),
+        ip: ip.clone(),
+        port: port.clone(),
+    };
     fs::write("join.json", serde_json::to_string_pretty(&join_info)?)?;
     println!("Join information saved to join.json");
 
@@ -49,19 +82,29 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     loop {
         let (stream, addr) = listener.accept().await?;
+        let acceptor = acceptor.clone();
         let master_node = Arc::clone(&master_node);
         let token = token.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, master_node, token, addr.to_string()).await {
-                eprintln!("Connection error: {:?}", e);
+            match acceptor.accept(stream).await {
+                Ok(tls_stream) => {
+                    if let Err(e) =
+                        handle_connection(tls_stream, master_node, token, addr.to_string()).await
+                    {
+                        eprintln!("Connection error: {:?}", e);
+                    }
+                }
+                Err(e) => eprintln!("TLS accept error: {:?}", e),
             }
         });
     }
 }
 
+/// Bearbeitet eine einzelne TLS-Verbindung zu einer Node.
+/// Validiert den Token und verarbeitet Nachrichten vom Client.
 async fn handle_connection(
-    mut socket: TcpStream,
+    mut socket: TlsStream<TcpStream>,
     master_node: Arc<MasterNode>,
     token: String,
     addr: String,
@@ -79,7 +122,11 @@ async fn handle_connection(
         socket.write_all(b"OK").await?;
 
         // Füge die Node zur verbundenen Liste hinzu
-        master_node.connected_nodes.lock().unwrap().insert(addr.clone(), addr.clone());
+        master_node
+            .connected_nodes
+            .lock()
+            .unwrap()
+            .insert(addr.clone(), addr.clone());
 
         loop {
             let mut buf = [0; 1024];
@@ -110,7 +157,12 @@ async fn handle_connection(
                     // Prüfe, ob ein freier Port verfügbar ist
                     if let Some(port) = allocate_port(&master_node) {
                         // Hole die Adresse der Ziel-Node
-                        let target_addr = master_node.connected_nodes.lock().unwrap().get(&target_id).cloned();
+                        let target_addr = master_node
+                            .connected_nodes
+                            .lock()
+                            .unwrap()
+                            .get(&target_id)
+                            .cloned();
 
                         if let Some(target_addr) = target_addr {
                             // Sende die Verbindungsinformation an die anfragende Node
@@ -145,10 +197,12 @@ async fn handle_connection(
     Ok(())
 }
 
+/// Erzeugt einen zufälligen Token zur Authentifizierung der Nodes.
 fn generate_token() -> String {
     Uuid::new_v4().to_string()
 }
 
+/// Reserviert einen freien Port aus der Portliste.
 fn allocate_port(master_node: &MasterNode) -> Option<u16> {
     let mut ports = master_node.available_ports.lock().unwrap();
     ports.iter().cloned().next().map(|port| {
@@ -157,9 +211,31 @@ fn allocate_port(master_node: &MasterNode) -> Option<u16> {
     })
 }
 
+/// Gibt einen zuvor belegten Port wieder frei.
 fn release_port(master_node: &MasterNode, addr: String) {
     let mut ports = master_node.available_ports.lock().unwrap();
     if let Some(port) = addr.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()) {
         ports.insert(port);
     }
+}
+
+/// Lädt Zertifikat und privaten Schlüssel und erstellt die TLS-Konfiguration.
+fn load_tls_config(
+    cert_path: &str,
+    key_path: &str,
+) -> Result<StdArc<ServerConfig>, Box<dyn Error + Send + Sync>> {
+    let cert_file = &mut BufReader::new(File::open(cert_path)?);
+    let key_file = &mut BufReader::new(File::open(key_path)?);
+
+    let cert_chain = certs(cert_file)?.into_iter().map(Certificate).collect();
+    let mut keys = pkcs8_private_keys(key_file)?
+        .into_iter()
+        .map(PrivateKey)
+        .collect::<Vec<_>>();
+    let config = ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, keys.remove(0))?;
+
+    Ok(StdArc::new(config))
 }

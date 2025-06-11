@@ -32,7 +32,9 @@ The master stores connected nodes in a `HashMap` and available ports in a `HashS
 1. Make sure [Rust](https://www.rust-lang.org/) is installed. Use the provided `scripts/install.sh` for a quick setup.
 2. Build each crate individually using `cargo build` inside `CPCluster_masterNode` and `CPCluster_node`.
 3. Run nodes separately in different terminals with `cargo run`.
-4. The project currently uses TCP without TLS. Future improvements could include adding encrypted communication and more robust error handling.
+4. Communication between nodes and the master now uses TLS via `tokio-rustls`.
+   Certificates are loaded from the `certs` directory of each crate. Self-signed
+   certificates can be generated using `openssl` if none are present.
 
 ## Additional documentation
 

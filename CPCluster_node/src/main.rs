@@ -1,7 +1,17 @@
-use std::{error::Error, fs};
+use rustls::{ClientConfig, RootCertStore, ServerName};
+use rustls_pemfile::certs;
 use serde::{Deserialize, Serialize};
-use tokio::{net::TcpStream, io::{AsyncReadExt, AsyncWriteExt}};
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::Arc as StdArc;
+use std::{error::Error, fs};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
+use tokio_rustls::{client::TlsStream, TlsConnector};
 
+// Informationen, die zum Herstellen der Verbindung mit dem Master benötigt werden
 #[derive(Serialize, Deserialize)]
 struct JoinInfo {
     token: String,
@@ -9,23 +19,30 @@ struct JoinInfo {
     port: String,
 }
 
+// Nachrichten zwischen Node und Master
 #[derive(Serialize, Deserialize, Debug)]
 enum NodeMessage {
-    RequestConnection(String),
-    ConnectionInfo(String, u16),
-    GetConnectedNodes,
+    RequestConnection(String),  // Verbindung zu einer Node anfordern
+    ConnectionInfo(String, u16), // Verbindungsdetails erhalten
+    GetConnectedNodes,          // Liste der verbundenen Nodes anfragen
     ConnectedNodes(Vec<String>),
-    Disconnect,
+    Disconnect,                 // Verbindung sauber beenden
 }
 
 #[tokio::main]
+/// Startet die Node, verbindet sich zum Master und führt das Basisprotokoll aus.
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let join_info = fs::read_to_string("join.json")?;
     let join_info: JoinInfo = serde_json::from_str(&join_info)?;
 
     let master_addr = format!("{}:{}", join_info.ip, join_info.port);
-    let mut master_stream = TcpStream::connect(&master_addr).await?;
+    let tcp_stream = TcpStream::connect(&master_addr).await?;
     println!("Connected to Master Node at {}", master_addr);
+
+    let tls_config = load_tls_config("certs/cert.pem")?;
+    let connector = TlsConnector::from(tls_config);
+    let server_name = ServerName::try_from(join_info.ip.as_str())?;
+    let mut master_stream = connector.connect(server_name, tcp_stream).await?;
 
     // Send only the token for authentication
     master_stream.write_all(join_info.token.as_bytes()).await?;
@@ -67,9 +84,28 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
-async fn send_message(stream: &mut TcpStream, msg: NodeMessage) -> Result<(), Box<dyn Error + Send + Sync>> {
+/// Hilfsfunktion zum Senden serialisierter Nachrichten über einen TLS-Stream.
+async fn send_message(
+    stream: &mut TlsStream<TcpStream>,
+    msg: NodeMessage,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let msg_data = serde_json::to_vec(&msg)?;
     stream.write_all(&msg_data).await?;
     println!("Sent message to Master Node: {:?}", msg);
     Ok(())
+}
+
+/// Lädt das Zertifikat des Masters und baut damit die TLS-Clientkonfiguration auf.
+fn load_tls_config(cert_path: &str) -> Result<StdArc<ClientConfig>, Box<dyn Error + Send + Sync>> {
+    let mut cert_file = BufReader::new(File::open(cert_path)?);
+    let certs = certs(&mut cert_file)?;
+    let mut root_store = RootCertStore::empty();
+    root_store.add_parsable_certificates(&certs);
+
+    let config = ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    Ok(StdArc::new(config))
 }
