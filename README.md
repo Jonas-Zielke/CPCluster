@@ -94,6 +94,23 @@ CPCluster is a distributed network of nodes that communicate with each other for
 4. **Handling Disconnection**:
    - If a node disconnects, the master releases the assigned port for future connections and notifies the other node if necessary.
 
+### Minimal Task Example
+
+After two nodes have established a direct connection, one node can assign a computation to the other. Node A sends an `AssignTask` message and waits for a `TaskResult` response:
+
+```rust
+use cpcluster_common::{NodeMessage, Task};
+let id = uuid::Uuid::new_v4().to_string();
+let task = NodeMessage::AssignTask {
+    id: id.clone(),
+    task: Task::Compute { expression: "1 + 2 * 3".into() },
+};
+sendMessage(&mut stream_to_b, task).await?;
+
+// Node B evaluates the expression and replies
+// NodeMessage::TaskResult { id, result: TaskResult::Number(7.0) }
+```
+
 ## Code Structure
 
 ### Master Node (`CPCluster_masterNode/src/main.rs`)

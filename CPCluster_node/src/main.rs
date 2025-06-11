@@ -1,5 +1,7 @@
-use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage};
 use cpcluster_common::config::Config;
+use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage, Task, TaskResult};
+use meval;
+use reqwest;
 use std::{error::Error, fs, sync::Arc};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -85,13 +87,51 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("Currently connected nodes in the network: {:?}", nodes);
     }
 
-    // Periodic heartbeat loop
+    let mut buf = vec![0; 2048];
+    let mut heartbeat_interval =
+        tokio::time::interval(std::time::Duration::from_millis(config.failover_timeout_ms));
+
     loop {
-        if let Err(e) = sendMessage(&mut stream, NodeMessage::Heartbeat).await {
-            println!("Heartbeat failed: {}", e);
-            break;
+        tokio::select! {
+            _ = heartbeat_interval.tick() => {
+                if let Err(e) = sendMessage(&mut stream, NodeMessage::Heartbeat).await {
+                    println!("Heartbeat failed: {}", e);
+                    break;
+                }
+            }
+            n = stream.read(&mut buf) => {
+                let n = match n { Ok(n) => n, Err(e) => { println!("Read error: {}", e); break; } };
+                if n == 0 { break; }
+                if let Ok(request) = serde_json::from_slice::<NodeMessage>(&buf[..n]) {
+                    match request {
+                        NodeMessage::AssignTask { id, task } => {
+                            let result = match task {
+                                Task::Compute { expression } => {
+                                    match meval::eval_str(&expression) {
+                                        Ok(v) => TaskResult::Number(v),
+                                        Err(e) => TaskResult::Error(e.to_string()),
+                                    }
+                                }
+                                Task::HttpRequest { url } => {
+                                    match reqwest::get(&url).await {
+                                        Ok(resp) => match resp.text().await {
+                                            Ok(text) => TaskResult::Response(text),
+                                            Err(e) => TaskResult::Error(e.to_string()),
+                                        },
+                                        Err(e) => TaskResult::Error(e.to_string()),
+                                    }
+                                }
+                            };
+                            let response = NodeMessage::TaskResult { id, result };
+                            if let Err(e) = sendMessage(&mut stream, response).await {
+                                println!("Failed to send task result: {}", e);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(config.failover_timeout_ms)).await;
     }
 
     // Attempt graceful disconnect if still connected

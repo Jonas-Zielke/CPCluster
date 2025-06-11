@@ -1,7 +1,7 @@
-use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage};
+use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage, Task};
 use cpcluster_common::config::Config;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     error::Error,
     fs,
     sync::{Arc, Mutex},
@@ -19,6 +19,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 struct NodeInfo {
     addr: String,
     last_heartbeat: u64,
+    active_tasks: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +27,8 @@ struct MasterNode {
     connectedNodes: Arc<Mutex<HashMap<String, NodeInfo>>>, // speichert Node-ID und Infos
     availablePorts: Arc<Mutex<HashSet<u16>>>,              // verwaltet verfügbare Ports
     failover_timeout_ms: u64,
+    pending_tasks: Arc<Mutex<VecDeque<(String, Task)>>>,
+    tasks: Arc<Mutex<HashMap<String, Task>>>,
 }
 
 #[tokio::main]
@@ -62,6 +65,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         connectedNodes: Arc::new(Mutex::new(HashMap::new())),
         availablePorts: Arc::new(Mutex::new((config.min_port..=config.max_port).collect())),
         failover_timeout_ms: config.failover_timeout_ms,
+        pending_tasks: Arc::new(Mutex::new(VecDeque::new())),
+        tasks: Arc::new(Mutex::new(HashMap::new())),
     });
     loadState(&masterNode);
 
@@ -130,9 +135,13 @@ where
                 NodeInfo {
                     addr: addr.clone(),
                     last_heartbeat: now_ms(),
+                    active_tasks: HashSet::new(),
                 },
             );
         saveState(&masterNode);
+
+        // try to immediately assign a pending task to this node
+        let _ = try_assign_task(&masterNode, &mut socket, &addr).await;
 
         loop {
             let mut buf = [0; 1024];
@@ -188,7 +197,14 @@ where
                     // Entferne die Node und gebe den Port frei
                     println!("Node disconnected and port released.");
                     releasePort(&masterNode, addr.clone());
-                    masterNode.connectedNodes.lock().unwrap().remove(&addr);
+                    if let Some(info) = masterNode.connectedNodes.lock().unwrap().remove(&addr) {
+                        let mut pending = masterNode.pending_tasks.lock().unwrap();
+                        for task_id in info.active_tasks {
+                            if let Some(task) = masterNode.tasks.lock().unwrap().remove(&task_id) {
+                                pending.push_back((task_id, task));
+                            }
+                        }
+                    }
                     saveState(&masterNode);
                     break;
                 }
@@ -199,9 +215,23 @@ where
                         .unwrap()
                         .entry(addr.clone())
                         .and_modify(|n| n.last_heartbeat = now_ms());
+                    let _ = try_assign_task(&masterNode, &mut socket, &addr).await;
+                }
+                NodeMessage::AssignTask { id, task } => {
+                    masterNode.pending_tasks.lock().unwrap().push_back((id.clone(), task.clone()));
+                    masterNode.tasks.lock().unwrap().insert(id, task);
+                    let _ = try_assign_task(&masterNode, &mut socket, &addr).await;
+                }
+                NodeMessage::TaskResult { id, result: _ } => {
+                    if let Some(node) = masterNode.connectedNodes.lock().unwrap().get_mut(&addr) {
+                        node.active_tasks.remove(&id);
+                    }
+                    masterNode.tasks.lock().unwrap().remove(&id);
+                    let _ = try_assign_task(&masterNode, &mut socket, &addr).await;
                 }
                 _ => println!("Unknown request"),
             }
+            let _ = try_assign_task(&masterNode, &mut socket, &addr).await;
         }
 
         // Entferne die Node aus der Liste der verbundenen Nodes
@@ -257,10 +287,49 @@ fn cleanupDeadNodes(master: &MasterNode) {
     }
     for addr in stale {
         println!("Node {} timed out", addr);
-        master.connectedNodes.lock().unwrap().remove(&addr);
+        if let Some(info) = master.connectedNodes.lock().unwrap().remove(&addr) {
+            let mut pending = master.pending_tasks.lock().unwrap();
+            for task_id in info.active_tasks {
+                if let Some(task) = master.tasks.lock().unwrap().remove(&task_id) {
+                    pending.push_back((task_id, task));
+                }
+            }
+        }
         releasePort(master, addr);
     }
     saveState(master);
+}
+
+async fn try_assign_task<S>(master: &MasterNode, socket: &mut S, addr: &str) -> Result<(), Box<dyn Error + Send + Sync>>
+where
+    S: AsyncWrite + Unpin,
+{
+    let maybe_task = {
+        let mut pending = master.pending_tasks.lock().unwrap();
+        let mut nodes = master.connectedNodes.lock().unwrap();
+        if let Some(node) = nodes.get_mut(addr) {
+            if node.active_tasks.is_empty() {
+                if let Some((id, task)) = pending.pop_front() {
+                    node.active_tasks.insert(id.clone());
+                    master.tasks.lock().unwrap().insert(id.clone(), task.clone());
+                    Some((id, task))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    if let Some((id, task)) = maybe_task {
+        let msg = NodeMessage::AssignTask { id, task };
+        let data = serde_json::to_vec(&msg)?;
+        socket.write_all(&data).await?;
+    }
+    Ok(())
 }
 
 fn generateTlsConfig() -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sync>> {
@@ -296,5 +365,75 @@ fn saveState(master: &MasterNode) {
     };
     if let Ok(data) = serde_json::to_string_pretty(&state) {
         let _ = fs::write("master_state.json", data);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cleanup_moves_tasks_to_pending() {
+        let master = MasterNode {
+            connectedNodes: Arc::new(Mutex::new(HashMap::new())),
+            availablePorts: Arc::new(Mutex::new(HashSet::new())),
+            failover_timeout_ms: 1,
+            pending_tasks: Arc::new(Mutex::new(VecDeque::new())),
+            tasks: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let mut tasks_set = HashSet::new();
+        tasks_set.insert("t1".to_string());
+        master.connectedNodes.lock().unwrap().insert(
+            "node".to_string(),
+            NodeInfo {
+                addr: "node".into(),
+                last_heartbeat: 0,
+                active_tasks: tasks_set,
+            },
+        );
+        master.tasks.lock().unwrap().insert(
+            "t1".to_string(),
+            Task::Compute { expression: "1".into() },
+        );
+
+        cleanupDeadNodes(&master);
+
+        assert!(master.connectedNodes.lock().unwrap().is_empty());
+        assert_eq!(master.pending_tasks.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn task_result_removes_active() {
+        let master = MasterNode {
+            connectedNodes: Arc::new(Mutex::new(HashMap::new())),
+            availablePorts: Arc::new(Mutex::new(HashSet::new())),
+            failover_timeout_ms: 1,
+            pending_tasks: Arc::new(Mutex::new(VecDeque::new())),
+            tasks: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let mut tasks_set = HashSet::new();
+        tasks_set.insert("t1".to_string());
+        master.connectedNodes.lock().unwrap().insert(
+            "node".to_string(),
+            NodeInfo {
+                addr: "node".into(),
+                last_heartbeat: now_ms(),
+                active_tasks: tasks_set,
+            },
+        );
+        master.tasks.lock().unwrap().insert(
+            "t1".to_string(),
+            Task::Compute { expression: "1".into() },
+        );
+
+        if let Some(node) = master.connectedNodes.lock().unwrap().get_mut("node") {
+            node.active_tasks.remove("t1");
+        }
+        master.tasks.lock().unwrap().remove("t1");
+
+        assert!(master.connectedNodes.lock().unwrap().get("node").unwrap().active_tasks.is_empty());
+        assert!(master.tasks.lock().unwrap().is_empty());
     }
 }

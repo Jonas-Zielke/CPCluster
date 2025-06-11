@@ -10,12 +10,27 @@ pub struct JoinInfo {
     pub port: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Task {
+    Compute { expression: String },
+    HttpRequest { url: String },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum TaskResult {
+    Number(f64),
+    Response(String),
+    Error(String),
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum NodeMessage {
     RequestConnection(String),
     ConnectionInfo(String, u16),
     GetConnectedNodes,
     ConnectedNodes(Vec<String>),
+    AssignTask { id: String, task: Task },
+    TaskResult { id: String, result: TaskResult },
     Disconnect,
     Heartbeat,
 }
