@@ -4,13 +4,13 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
-const MIN_PORT: u16 = 55001;
-const MAX_PORT: u16 = 55999;
+const minPort: u16 = 55001;
+const maxPort: u16 = 55999;
 
 #[derive(Debug, Clone)]
 struct MasterNode {
-    connected_nodes: Arc<Mutex<HashMap<String, String>>>, // speichert Node-ID und IP-Adresse
-    available_ports: Arc<Mutex<HashSet<u16>>>,            // verwaltet verfügbare Ports
+    connectedNodes: Arc<Mutex<HashMap<String, String>>>, // speichert Node-ID und IP-Adresse
+    availablePorts: Arc<Mutex<HashSet<u16>>>,            // verwaltet verfügbare Ports
 }
 
 
@@ -20,34 +20,34 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let ip = "127.0.0.1".to_string();
     let port = "55000".to_string();
 
-    let join_info = JoinInfo { token: token.clone(), ip: ip.clone(), port: port.clone() };
-    fs::write("join.json", serde_json::to_string_pretty(&join_info)?)?;
+    let joinInfo = JoinInfo { token: token.clone(), ip: ip.clone(), port: port.clone() };
+    fs::write("join.json", serde_json::to_string_pretty(&joinInfo)?)?;
     println!("Join information saved to join.json");
 
     let listener = TcpListener::bind(format!("{}:{}", ip, port)).await?;
     println!("Master Node listening on {}:{}", ip, port);
 
-    let master_node = Arc::new(MasterNode {
-        connected_nodes: Arc::new(Mutex::new(HashMap::new())),
-        available_ports: Arc::new(Mutex::new((MIN_PORT..=MAX_PORT).collect())),
+    let masterNode = Arc::new(MasterNode {
+        connectedNodes: Arc::new(Mutex::new(HashMap::new())),
+        availablePorts: Arc::new(Mutex::new((minPort..=maxPort).collect())),
     });
 
     loop {
         let (stream, addr) = listener.accept().await?;
-        let master_node = Arc::clone(&master_node);
+        let masterNode = Arc::clone(&masterNode);
         let token = token.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, master_node, token, addr.to_string()).await {
+            if let Err(e) = handleConnection(stream, masterNode, token, addr.to_string()).await {
                 eprintln!("Connection error: {:?}", e);
             }
         });
     }
 }
 
-async fn handle_connection(
+async fn handleConnection(
     mut socket: TcpStream,
-    master_node: Arc<MasterNode>,
+    masterNode: Arc<MasterNode>,
     token: String,
     addr: String,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -64,7 +64,7 @@ async fn handle_connection(
         socket.write_all(b"OK").await?;
 
         // Füge die Node zur verbundenen Liste hinzu
-        master_node.connected_nodes.lock().unwrap().insert(addr.clone(), addr.clone());
+        masterNode.connectedNodes.lock().unwrap().insert(addr.clone(), addr.clone());
 
         loop {
             let mut buf = [0; 1024];
@@ -78,28 +78,28 @@ async fn handle_connection(
             match request {
                 NodeMessage::GetConnectedNodes => {
                     // Sende die Liste aller verbundenen Nodes
-                    let connected_nodes = master_node
-                        .connected_nodes
+                    let connectedNodes = masterNode
+                        .connectedNodes
                         .lock()
                         .unwrap()
                         .keys()
                         .cloned()
                         .collect::<Vec<String>>();
 
-                    let response = NodeMessage::ConnectedNodes(connected_nodes);
+                    let response = NodeMessage::ConnectedNodes(connectedNodes);
                     let response_data = serde_json::to_vec(&response)?;
                     socket.write_all(&response_data).await?;
                     println!("Sent connected nodes list to client");
                 }
                 NodeMessage::RequestConnection(target_id) => {
                     // Prüfe, ob ein freier Port verfügbar ist
-                    if let Some(port) = allocate_port(&master_node) {
+                    if let Some(port) = allocatePort(&masterNode) {
                         // Hole die Adresse der Ziel-Node
-                        let target_addr = master_node.connected_nodes.lock().unwrap().get(&target_id).cloned();
+                        let targetAddr = masterNode.connectedNodes.lock().unwrap().get(&target_id).cloned();
 
-                        if let Some(target_addr) = target_addr {
+                        if let Some(targetAddr) = targetAddr {
                             // Sende die Verbindungsinformation an die anfragende Node
-                            let response = NodeMessage::ConnectionInfo(target_addr, port);
+                            let response = NodeMessage::ConnectionInfo(targetAddr, port);
                             let response_data = serde_json::to_vec(&response)?;
                             socket.write_all(&response_data).await?;
                             println!("Connection info sent to {} on port {}", target_id, port);
@@ -113,7 +113,7 @@ async fn handle_connection(
                 NodeMessage::Disconnect => {
                     // Entferne die Node und gebe den Port frei
                     println!("Node disconnected and port released.");
-                    release_port(&master_node, addr.clone());
+                    releasePort(&masterNode, addr.clone());
                     break;
                 }
                 _ => println!("Unknown request"),
@@ -121,7 +121,7 @@ async fn handle_connection(
         }
 
         // Entferne die Node aus der Liste der verbundenen Nodes
-        master_node.connected_nodes.lock().unwrap().remove(&addr);
+        masterNode.connectedNodes.lock().unwrap().remove(&addr);
     } else {
         println!("Client provided an invalid token {}", received_token);
         socket.write_all(b"Invalid token").await?;
@@ -134,16 +134,16 @@ fn generate_token() -> String {
     Uuid::new_v4().to_string()
 }
 
-fn allocate_port(master_node: &MasterNode) -> Option<u16> {
-    let mut ports = master_node.available_ports.lock().unwrap();
+fn allocatePort(masterNode: &MasterNode) -> Option<u16> {
+    let mut ports = masterNode.availablePorts.lock().unwrap();
     ports.iter().cloned().next().map(|port| {
         ports.remove(&port);
         port
     })
 }
 
-fn release_port(master_node: &MasterNode, addr: String) {
-    let mut ports = master_node.available_ports.lock().unwrap();
+fn releasePort(masterNode: &MasterNode, addr: String) {
+    let mut ports = masterNode.availablePorts.lock().unwrap();
     if let Some(port) = addr.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()) {
         ports.insert(port);
     }

@@ -15,9 +15,9 @@ Both projects are written in Rust and use `tokio` for asynchronous networking an
 The main logic is implemented in `CPCluster_masterNode/src/main.rs`.
 Key components:
 
-- `generate_token()` – creates a UUID used to authenticate nodes.
-- `handle_connection()` – accepts a TCP connection from a node, validates the token and handles requests (`RequestConnection`, `GetConnectedNodes`, `Disconnect`).
-- `allocate_port()` / `release_port()` – manage available ports for direct node communication.
+- `generateToken()` – creates a UUID used to authenticate nodes.
+- `handleConnection()` – accepts a TCP connection from a node, validates the token and handles requests (`RequestConnection`, `GetConnectedNodes`, `Disconnect`).
+- `allocatePort()` / `releasePort()` – manage available ports for direct node communication.
 
 The master stores connected nodes in a `HashMap` and available ports in a `HashSet`, both protected by `Mutex`.
 

@@ -90,15 +90,15 @@ CPCluster is a distributed network of nodes that communicate with each other for
 
 ### Master Node (`CPCluster_masterNode/src/main.rs`)
 
-- `generate_token()`: Generates a unique token for authentication.
-- `handle_connection()`: Handles incoming node requests, validates tokens, and manages connection requests.
-- `allocate_port()` and `release_port()`: Manage port allocation and release for node connections.
+- `generateToken()`: Generates a unique token for authentication.
+- `handleConnection()`: Handles incoming node requests, validates tokens, and manages connection requests.
+- `allocatePort()` and `releasePort()`: Manage port allocation and release for node connections.
 
 ### Normal Node (`CPCluster_node/src/main.rs`)
 
-- `connect_to_master()`: Connects to the master and authenticates using the token.
-- `request_connected_nodes()`: Requests the list of currently connected nodes from the master.
-- `request_connection_to_node()`: Sends a request to the master to establish a direct connection with another node.
+- `connectToMaster()`: Connects to the master and authenticates using the token.
+- `requestConnectedNodes()`: Requests the list of currently connected nodes from the master.
+- `requestConnectionToNode()`: Sends a request to the master to establish a direct connection with another node.
 - `disconnect()`: Sends a disconnect request to the master to release resources and notify other nodes.
 
 ## Example `join.json`
