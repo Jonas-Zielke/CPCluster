@@ -34,6 +34,10 @@ CPCluster is a distributed network of nodes that communicate with each other for
    You can run `scripts/install.sh` from the repository root to install Rust
    (if missing) and build both projects automatically.
 
+   For a full container setup including system packages you can also run
+   `./setup_container.sh` from the repository root. This installs required
+   packages, Rust and builds both crates.
+
 2. **Navigate to each project**:
    - Master Node:
      ```bash
