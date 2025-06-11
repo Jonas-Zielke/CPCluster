@@ -1,22 +1,6 @@
 use std::{error::Error, fs};
-use serde::{Deserialize, Serialize};
+use cpcluster_common::{JoinInfo, NodeMessage};
 use tokio::{net::TcpStream, io::{AsyncReadExt, AsyncWriteExt}};
-
-#[derive(Serialize, Deserialize)]
-struct JoinInfo {
-    token: String,
-    ip: String,
-    port: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-enum NodeMessage {
-    RequestConnection(String),
-    ConnectionInfo(String, u16),
-    GetConnectedNodes,
-    ConnectedNodes(Vec<String>),
-    Disconnect,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {

@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "CPCluster_masterNode",
+    "CPCluster_node",
+    "cpcluster_common"
+]

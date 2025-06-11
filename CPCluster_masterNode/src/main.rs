@@ -1,5 +1,5 @@
 use std::{collections::{HashMap, HashSet}, error::Error, fs, sync::{Arc, Mutex}};
-use serde::{Deserialize, Serialize};
+use cpcluster_common::{JoinInfo, NodeMessage};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
@@ -7,27 +7,12 @@ use uuid::Uuid;
 const MIN_PORT: u16 = 55001;
 const MAX_PORT: u16 = 55999;
 
-#[derive(Serialize, Deserialize)]
-struct JoinInfo {
-    token: String,
-    ip: String,
-    port: String,
-}
-
 #[derive(Debug, Clone)]
 struct MasterNode {
     connected_nodes: Arc<Mutex<HashMap<String, String>>>, // speichert Node-ID und IP-Adresse
     available_ports: Arc<Mutex<HashSet<u16>>>,            // verwaltet verfügbare Ports
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-enum NodeMessage {
-    RequestConnection(String),   // Anfrage, sich mit einer anderen Node zu verbinden
-    ConnectionInfo(String, u16), // Verbindungsinfo: Ziel-IP und Port
-    GetConnectedNodes,           // Anforderung für die Liste verbundener Nodes
-    ConnectedNodes(Vec<String>), // Antwort mit der Liste verbundener Nodes
-    Disconnect,                  // Nachricht zum Beenden der Verbindung
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
