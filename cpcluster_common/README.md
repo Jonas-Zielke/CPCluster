@@ -12,3 +12,8 @@
   - `Disconnect` – tells the master a node is leaving.
 
 These types are `serde` serializable and are used by both the `cpcluster_masternode` and `cpcluster_node` crates.
+
+## Helper Functions
+
+- `isLocalIp(&str)` – returns `true` if the provided IP address is part of a private
+  network. This allows the nodes to decide whether to enable TLS.

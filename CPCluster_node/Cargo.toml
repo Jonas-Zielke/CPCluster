@@ -11,7 +11,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.23"
 
 # Rustls für TLS-Konfigurationen und Zertifikate
-rustls = "0.20.9"
+rustls = { version = "0.20.9", features = ["dangerous_configuration"] }
 
 # Rustls-pemfile zum Einlesen von Zertifikaten und Schlüsseln im PEM-Format
 rustls-pemfile = "0.2.1"
