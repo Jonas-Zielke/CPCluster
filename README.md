@@ -31,6 +31,9 @@ CPCluster is a distributed network of nodes that communicate with each other for
    cd CPCluster
    ```
 
+   You can run `scripts/install.sh` from the repository root to install Rust
+   (if missing) and build both projects automatically.
+
 2. **Navigate to each project**:
    - Master Node:
      ```bash
@@ -105,6 +108,9 @@ CPCluster is a distributed network of nodes that communicate with each other for
 ```
 
 Ensure each node uses the same `join.json` for authentication with the master node.
+
+For additional information on the code layout and contribution hints see
+[`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md).
 
 ## License
 
