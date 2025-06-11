@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+pub mod config;
+pub use config::Config;
+
 #[derive(Serialize, Deserialize)]
 pub struct JoinInfo {
     pub token: String,
@@ -14,6 +17,7 @@ pub enum NodeMessage {
     GetConnectedNodes,
     ConnectedNodes(Vec<String>),
     Disconnect,
+    Heartbeat,
 }
 
 /// Determine if an IP address is part of a private local network.

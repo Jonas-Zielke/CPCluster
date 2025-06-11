@@ -1,4 +1,5 @@
 use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage};
+use cpcluster_common::config::Config;
 use std::{error::Error, fs, sync::Arc};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -30,22 +31,29 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let joinInfo = fs::read_to_string("join.json")?;
     let joinInfo: JoinInfo = serde_json::from_str(&joinInfo)?;
 
-    let masterAddr = format!("{}:{}", joinInfo.ip, joinInfo.port);
-    let mut stream: Box<dyn ReadWrite + Unpin + Send> = if isLocalIp(&joinInfo.ip) {
-        let tcp = TcpStream::connect(&masterAddr).await?;
-        Box::new(tcp)
-    } else {
-        let tcp = TcpStream::connect(&masterAddr).await?;
-        let config = rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
-            .with_no_client_auth();
-        let connector = TlsConnector::from(Arc::new(config));
-        let serverName = rustls::ServerName::try_from(joinInfo.ip.as_str())?;
-        let tls = connector.connect(serverName, tcp).await?;
-        Box::new(tls)
+    let config = Config::load("config.json").unwrap_or_default();
+
+    let mut stream: Option<Box<dyn ReadWrite + Unpin + Send>> = None;
+    for addr in &config.master_addresses {
+        match connect(addr, isLocalIp(&joinInfo.ip), &joinInfo.ip).await {
+            Ok(s) => {
+                println!("Connected to Master Node at {}", addr);
+                stream = Some(s);
+                break;
+            }
+            Err(e) => {
+                println!("Failed to connect to {}: {}", addr, e);
+            }
+        }
+    }
+
+    let mut stream = match stream {
+        Some(s) => s,
+        None => {
+            println!("Unable to connect to any master node");
+            return Ok(());
+        }
     };
-    println!("Connected to Master Node at {}", masterAddr);
 
     // Send only the token for authentication
     stream.write_all(joinInfo.token.as_bytes()).await?;
@@ -77,11 +85,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("Currently connected nodes in the network: {:?}", nodes);
     }
 
-    // Here you can proceed with additional actions, such as requesting a connection to another node.
+    // Periodic heartbeat loop
+    loop {
+        if let Err(e) = sendMessage(&mut stream, NodeMessage::Heartbeat).await {
+            println!("Heartbeat failed: {}", e);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(config.failover_timeout_ms)).await;
+    }
 
-    // Disconnect from the Master Node
-    let disconnectMsg = NodeMessage::Disconnect;
-    sendMessage(&mut stream, disconnectMsg).await?;
+    // Attempt graceful disconnect if still connected
+    let _ = sendMessage(&mut stream, NodeMessage::Disconnect).await;
     println!("Disconnected from Master Node");
 
     Ok(())
@@ -98,4 +112,25 @@ where
     stream.write_all(&msg_data).await?;
     println!("Sent message to Master Node: {:?}", msg);
     Ok(())
+}
+
+async fn connect(
+    addr: &str,
+    local: bool,
+    ip: &str,
+) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
+    if local {
+        let tcp = TcpStream::connect(addr).await?;
+        Ok(Box::new(tcp))
+    } else {
+        let tcp = TcpStream::connect(addr).await?;
+        let config = rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
+            .with_no_client_auth();
+        let connector = TlsConnector::from(Arc::new(config));
+        let serverName = rustls::ServerName::try_from(ip)?;
+        let tls = connector.connect(serverName, tcp).await?;
+        Ok(Box::new(tls))
+    }
 }

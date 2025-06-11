@@ -1,4 +1,5 @@
 use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage};
+use cpcluster_common::config::Config;
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -10,21 +11,37 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{rustls, TlsAcceptor};
 use rcgen::generate_simple_self_signed;
 use uuid::Uuid;
+use serde::{Deserialize, Serialize};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const MIN_PORT: u16 = 55001;
-const MAX_PORT: u16 = 55999;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NodeInfo {
+    addr: String,
+    last_heartbeat: u64,
+}
 
 #[derive(Debug, Clone)]
 struct MasterNode {
-    connectedNodes: Arc<Mutex<HashMap<String, String>>>, // speichert Node-ID und IP-Adresse
-    availablePorts: Arc<Mutex<HashSet<u16>>>,            // verwaltet verfügbare Ports
+    connectedNodes: Arc<Mutex<HashMap<String, NodeInfo>>>, // speichert Node-ID und Infos
+    availablePorts: Arc<Mutex<HashSet<u16>>>,              // verwaltet verfügbare Ports
+    failover_timeout_ms: u64,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let config = Config::load("config.json").unwrap_or_default();
+    config.save("config.json").ok();
+
     let token = generateToken();
-    let ip = "127.0.0.1".to_string();
-    let port = "55000".to_string();
+    let addr = config
+        .master_addresses
+        .get(0)
+        .cloned()
+        .unwrap_or_else(|| "127.0.0.1:55000".to_string());
+    let mut parts = addr.split(':');
+    let ip = parts.next().unwrap_or("127.0.0.1").to_string();
+    let port = parts.next().unwrap_or("55000").to_string();
 
     let joinInfo = JoinInfo {
         token: token.clone(),
@@ -43,7 +60,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let masterNode = Arc::new(MasterNode {
         connectedNodes: Arc::new(Mutex::new(HashMap::new())),
-        availablePorts: Arc::new(Mutex::new((MIN_PORT..=MAX_PORT).collect())),
+        availablePorts: Arc::new(Mutex::new((config.min_port..=config.max_port).collect())),
+        failover_timeout_ms: config.failover_timeout_ms,
+    });
+    loadState(&masterNode);
+
+    // Cleanup task to remove nodes that stopped sending heartbeats
+    let cleanup_master = Arc::clone(&masterNode);
+    tokio::spawn(async move {
+        let interval = Duration::from_millis(config.failover_timeout_ms);
+        loop {
+            tokio::time::sleep(interval).await;
+            cleanupDeadNodes(&cleanup_master);
+        }
     });
 
     loop {
@@ -96,7 +125,14 @@ where
             .connectedNodes
             .lock()
             .unwrap()
-            .insert(addr.clone(), addr.clone());
+            .insert(
+                addr.clone(),
+                NodeInfo {
+                    addr: addr.clone(),
+                    last_heartbeat: now_ms(),
+                },
+            );
+        saveState(&masterNode);
 
         loop {
             let mut buf = [0; 1024];
@@ -132,7 +168,8 @@ where
                             .lock()
                             .unwrap()
                             .get(&target_id)
-                            .cloned();
+                            .cloned()
+                            .map(|n| n.addr);
 
                         if let Some(target_addr) = target_addr {
                             // Sende die Verbindungsinformation an die anfragende Node
@@ -151,7 +188,17 @@ where
                     // Entferne die Node und gebe den Port frei
                     println!("Node disconnected and port released.");
                     releasePort(&masterNode, addr.clone());
+                    masterNode.connectedNodes.lock().unwrap().remove(&addr);
+                    saveState(&masterNode);
                     break;
+                }
+                NodeMessage::Heartbeat => {
+                    masterNode
+                        .connectedNodes
+                        .lock()
+                        .unwrap()
+                        .entry(addr.clone())
+                        .and_modify(|n| n.last_heartbeat = now_ms());
                 }
                 _ => println!("Unknown request"),
             }
@@ -159,6 +206,7 @@ where
 
         // Entferne die Node aus der Liste der verbundenen Nodes
         masterNode.connectedNodes.lock().unwrap().remove(&addr);
+        saveState(&masterNode);
     } else {
         println!("Client provided an invalid token {}", received_token);
         socket.write_all(b"Invalid token").await?;
@@ -175,6 +223,7 @@ fn allocatePort(masterNode: &MasterNode) -> Option<u16> {
     let mut ports = masterNode.availablePorts.lock().unwrap();
     ports.iter().cloned().next().map(|port| {
         ports.remove(&port);
+        saveState(masterNode);
         port
     })
 }
@@ -183,7 +232,35 @@ fn releasePort(masterNode: &MasterNode, addr: String) {
     let mut ports = masterNode.availablePorts.lock().unwrap();
     if let Some(port) = addr.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()) {
         ports.insert(port);
+        saveState(masterNode);
     }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+fn cleanupDeadNodes(master: &MasterNode) {
+    let timeout = master.failover_timeout_ms * 2;
+    let now = now_ms();
+    let mut stale = Vec::new();
+    {
+        let nodes = master.connectedNodes.lock().unwrap();
+        for (addr, info) in nodes.iter() {
+            if now.saturating_sub(info.last_heartbeat) > timeout {
+                stale.push(addr.clone());
+            }
+        }
+    }
+    for addr in stale {
+        println!("Node {} timed out", addr);
+        master.connectedNodes.lock().unwrap().remove(&addr);
+        releasePort(master, addr);
+    }
+    saveState(master);
 }
 
 fn generateTlsConfig() -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sync>> {
@@ -195,4 +272,29 @@ fn generateTlsConfig() -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sy
         .with_no_client_auth()
         .with_single_cert(vec![rustls::Certificate(cert_der)], rustls::PrivateKey(key_der))?;
     Ok(config)
+}
+
+#[derive(Serialize, Deserialize)]
+struct MasterState {
+    connected_nodes: HashMap<String, NodeInfo>,
+    available_ports: Vec<u16>,
+}
+
+fn loadState(master: &MasterNode) {
+    if let Ok(data) = fs::read_to_string("master_state.json") {
+        if let Ok(state) = serde_json::from_str::<MasterState>(&data) {
+            *master.connectedNodes.lock().unwrap() = state.connected_nodes;
+            *master.availablePorts.lock().unwrap() = state.available_ports.into_iter().collect();
+        }
+    }
+}
+
+fn saveState(master: &MasterNode) {
+    let state = MasterState {
+        connected_nodes: master.connectedNodes.lock().unwrap().clone(),
+        available_ports: master.availablePorts.lock().unwrap().iter().cloned().collect(),
+    };
+    if let Ok(data) = serde_json::to_string_pretty(&state) {
+        let _ = fs::write("master_state.json", data);
+    }
 }

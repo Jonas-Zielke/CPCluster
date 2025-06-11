@@ -19,11 +19,11 @@ Key components:
 - `handle_connection()` – accepts a TCP connection from a node, validates the token and handles requests (`RequestConnection`, `GetConnectedNodes`, `Disconnect`).
 - `allocate_port()` / `release_port()` – manage available ports for direct node communication.
 
-The master stores connected nodes in a `HashMap` and available ports in a `HashSet`, both protected by `Mutex`.
+The master stores connected nodes together with the timestamp of their last heartbeat. A background task periodically cleans up nodes that stop sending heartbeats. Available ports are tracked in a `HashSet`, both collections protected by `Mutex`.
 
 ## Node overview
 
-`CPCluster_node/src/main.rs` shows how a node authenticates with the master and requests the list of connected nodes. It demonstrates a minimal workflow for joining the network and disconnecting.
+`CPCluster_node/src/main.rs` shows how a node authenticates with the master and requests the list of connected nodes. After connecting it periodically sends heartbeat messages until the connection is closed.
 
 - `send_message()` – helper to serialize a `NodeMessage` and send it via `TcpStream`.
 
@@ -32,7 +32,7 @@ The master stores connected nodes in a `HashMap` and available ports in a `HashS
 1. Make sure [Rust](https://www.rust-lang.org/) is installed. Use the provided `scripts/install.sh` for a quick setup.
 2. Build each crate individually using `cargo build` inside `CPCluster_masterNode` and `CPCluster_node`.
 3. Run nodes separately in different terminals with `cargo run`.
-4. The project currently uses TCP without TLS. Future improvements could include adding encrypted communication and more robust error handling.
+4. Runtime options such as port ranges or master addresses are loaded from `config.json` via the `Config` helper in `cpcluster_common`.
 
 ## Additional documentation
 

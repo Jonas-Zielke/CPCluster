@@ -10,8 +10,13 @@
   - `ConnectionInfo(String, u16)` – master response giving target IP and port.
   - `GetConnectedNodes` and `ConnectedNodes(Vec<String>)` – request and response for the list of nodes currently in the cluster.
   - `Disconnect` – tells the master a node is leaving.
+  - `Heartbeat` – periodic keep-alive message sent by the nodes.
 
 These types are `serde` serializable and are used by both the `cpcluster_masternode` and `cpcluster_node` crates.
+
+## Configuration
+
+`Config` offers runtime configuration such as port ranges, failover timeout and the list of master nodes. A default configuration is returned when no `config.json` file is present.
 
 ## Helper Functions
 
