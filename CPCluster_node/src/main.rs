@@ -1,5 +1,5 @@
 use cpcluster_common::config::Config;
-use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage, Task, TaskResult};
+use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, Task, TaskResult};
 use meval::eval_str;
 use reqwest::Client;
 use std::{
@@ -34,15 +34,15 @@ impl rustls::client::ServerCertVerifier for NoCertificateVerification {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let joinInfo = fs::read_to_string("join.json")?;
-    let joinInfo: JoinInfo = serde_json::from_str(&joinInfo)?;
+    let join_info = fs::read_to_string("join.json")?;
+    let join_info: JoinInfo = serde_json::from_str(&join_info)?;
 
     let config = Config::load("config.json").unwrap_or_default();
 
     let mut stream: Option<Box<dyn ReadWrite + Unpin + Send>> = None;
     let open_tasks: Arc<Mutex<Vec<NodeMessage>>> = Arc::new(Mutex::new(Vec::new()));
     for addr in &config.master_addresses {
-        match connect(addr, isLocalIp(&joinInfo.ip), &joinInfo.ip).await {
+        match connect(addr, is_local_ip(&join_info.ip), &join_info.ip).await {
             Ok(s) => {
                 println!("Connected to Master Node at {}", addr);
                 stream = Some(s);
@@ -63,21 +63,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     };
 
     // Send only the token for authentication
-    stream.write_all(joinInfo.token.as_bytes()).await?;
+    stream.write_all(join_info.token.as_bytes()).await?;
     println!("Token sent for authentication");
 
     // Read and verify authentication response from the master node
-    let mut authResponse = vec![0; 1024];
-    let n = stream.read(&mut authResponse).await?;
-    if n == 0 || &authResponse[..n] == b"Invalid token" {
+    let mut auth_response = vec![0; 1024];
+    let n = stream.read(&mut auth_response).await?;
+    if n == 0 || &auth_response[..n] == b"Invalid token" {
         println!("Authentication failed");
         return Ok(());
     }
     println!("Authentication successful");
 
     // Request to get the list of currently connected nodes
-    let getNodesRequest = NodeMessage::GetConnectedNodes;
-    sendMessage(&mut stream, getNodesRequest).await?;
+    let get_nodes_request = NodeMessage::GetConnectedNodes;
+    send_message(&mut stream, get_nodes_request).await?;
 
     // Receive and display the list of connected nodes
     let mut buf = vec![0; 1024];
@@ -91,15 +91,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     if let NodeMessage::ConnectedNodes(nodes) = response {
         println!("Currently connected nodes in the network: {:?}", nodes);
         if let Some(peer) = nodes.first() {
-            sendMessage(&mut stream, NodeMessage::RequestConnection(peer.clone())).await?;
+            send_message(&mut stream, NodeMessage::RequestConnection(peer.clone())).await?;
         }
     }
 
     // Periodic heartbeat loop
     loop {
-        if let Err(e) = sendMessage(&mut stream, NodeMessage::Heartbeat).await {
+        if let Err(e) = send_message(&mut stream, NodeMessage::Heartbeat).await {
             println!("Heartbeat failed: {}", e);
-            match reconnect(&joinInfo, &config, &open_tasks).await {
+            match reconnect(&join_info, &config, &open_tasks).await {
                 Ok(s) => {
                     stream = s;
                     continue;
@@ -138,13 +138,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     // Attempt graceful disconnect if still connected
-    let _ = sendMessage(&mut stream, NodeMessage::Disconnect).await;
+    let _ = send_message(&mut stream, NodeMessage::Disconnect).await;
     println!("Disconnected from Master Node");
 
     Ok(())
 }
 
-async fn sendMessage<S>(
+async fn send_message<S>(
     stream: &mut S,
     msg: NodeMessage,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
@@ -172,8 +172,8 @@ async fn connect(
             .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
             .with_no_client_auth();
         let connector = TlsConnector::from(Arc::new(config));
-        let serverName = rustls::ServerName::try_from(ip)?;
-        let tls = connector.connect(serverName, tcp).await?;
+        let server_name = rustls::ServerName::try_from(ip)?;
+        let tls = connector.connect(server_name, tcp).await?;
         Ok(Box::new(tls))
     }
 }
@@ -184,7 +184,7 @@ async fn reconnect(
     open_tasks: &Arc<Mutex<Vec<NodeMessage>>>,
 ) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
     for addr in &config.master_addresses {
-        match connect(addr, isLocalIp(&join_info.ip), &join_info.ip).await {
+        match connect(addr, is_local_ip(&join_info.ip), &join_info.ip).await {
             Ok(mut s) => {
                 println!("Reconnected to Master Node at {}", addr);
 
@@ -199,7 +199,7 @@ async fn reconnect(
                 println!("Re-authentication successful");
 
                 // request nodes again
-                if let Err(e) = sendMessage(&mut s, NodeMessage::GetConnectedNodes).await {
+                if let Err(e) = send_message(&mut s, NodeMessage::GetConnectedNodes).await {
                     println!("Failed to request connected nodes: {}", e);
                 } else {
                     let mut buf = vec![0; 1024];
@@ -217,7 +217,7 @@ async fn reconnect(
                 // resend open tasks
                 let tasks = open_tasks.lock().unwrap().clone();
                 for task in tasks {
-                    if let Err(e) = sendMessage(&mut s, task.clone()).await {
+                    if let Err(e) = send_message(&mut s, task.clone()).await {
                         println!("Failed to resend task: {}", e);
                     }
                 }
@@ -242,7 +242,7 @@ async fn handle_connection(
     tasks: Arc<Mutex<Vec<NodeMessage>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let addr = format!("{}:{}", target, port);
-    let use_tls = !isLocalIp(&target);
+    let use_tls = !is_local_ip(&target);
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
 
     let connect_fut = TcpStream::connect(&addr);
@@ -304,7 +304,7 @@ async fn handle_connection(
                 result,
             };
             tasks.lock().unwrap().push(msg.clone());
-            sendMessage(&mut stream, msg.clone()).await?;
+            send_message(&mut stream, msg.clone()).await?;
             tasks.lock().unwrap().retain(|m| match m {
                 NodeMessage::TaskResult { id: rid, .. } => rid != &id,
                 _ => true,

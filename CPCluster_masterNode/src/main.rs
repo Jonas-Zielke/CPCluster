@@ -1,5 +1,5 @@
 use cpcluster_common::config::Config;
-use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage, Task};
+use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, Task};
 use rcgen::generate_simple_self_signed;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -24,8 +24,8 @@ struct NodeInfo {
 
 #[derive(Debug, Clone)]
 struct MasterNode {
-    connectedNodes: Arc<Mutex<HashMap<String, NodeInfo>>>, // speichert Node-ID und Infos
-    availablePorts: Arc<Mutex<HashSet<u16>>>,              // verwaltet verfügbare Ports
+    connected_nodes: Arc<Mutex<HashMap<String, NodeInfo>>>, // speichert Node-ID und Infos
+    available_ports: Arc<Mutex<HashSet<u16>>>,              // verwaltet verfügbare Ports
     failover_timeout_ms: u64,
     pending_tasks: Arc<Mutex<HashMap<String, Task>>>,
 }
@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = Config::load("config.json").unwrap_or_default();
     config.save("config.json").ok();
 
-    let token = generateToken();
+    let token = generate_token();
     let addr = config
         .master_addresses
         .get(0)
@@ -45,52 +45,52 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let ip = parts.next().unwrap_or("127.0.0.1").to_string();
     let port = parts.next().unwrap_or("55000").to_string();
 
-    let joinInfo = JoinInfo {
+    let join_info = JoinInfo {
         token: token.clone(),
         ip: ip.clone(),
         port: port.clone(),
     };
-    fs::write("join.json", serde_json::to_string_pretty(&joinInfo)?)?;
+    fs::write("join.json", serde_json::to_string_pretty(&join_info)?)?;
     println!("Join information saved to join.json");
 
     let listener = TcpListener::bind(format!("{}:{}", ip, port)).await?;
     println!("Master Node listening on {}:{}", ip, port);
 
     // prepare TLS acceptor using a self-signed certificate
-    let tlsConfig = generateTlsConfig()?;
-    let tlsAcceptor = TlsAcceptor::from(Arc::new(tlsConfig));
+    let tls_config = generate_tls_config()?;
+    let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
-    let masterNode = Arc::new(MasterNode {
-        connectedNodes: Arc::new(Mutex::new(HashMap::new())),
-        availablePorts: Arc::new(Mutex::new((config.min_port..=config.max_port).collect())),
+    let master_node = Arc::new(MasterNode {
+        connected_nodes: Arc::new(Mutex::new(HashMap::new())),
+        available_ports: Arc::new(Mutex::new((config.min_port..=config.max_port).collect())),
         failover_timeout_ms: config.failover_timeout_ms,
         pending_tasks: Arc::new(Mutex::new(HashMap::new())),
     });
-    loadState(&masterNode);
+    load_state(&master_node);
 
     // Cleanup task to remove nodes that stopped sending heartbeats
-    let cleanup_master = Arc::clone(&masterNode);
+    let cleanup_master = Arc::clone(&master_node);
     tokio::spawn(async move {
         let interval = Duration::from_millis(config.failover_timeout_ms);
         loop {
             tokio::time::sleep(interval).await;
-            cleanupDeadNodes(&cleanup_master);
+            cleanup_dead_nodes(&cleanup_master);
         }
     });
 
     loop {
         let (stream, addr) = listener.accept().await?;
-        let masterNode = Arc::clone(&masterNode);
+        let master_node = Arc::clone(&master_node);
         let token = token.clone();
 
-        let acceptor = tlsAcceptor.clone();
+        let acceptor = tls_acceptor.clone();
         tokio::spawn(async move {
-            let useTls = !isLocalIp(&addr.ip().to_string());
-            if useTls {
+            let use_tls = !is_local_ip(&addr.ip().to_string());
+            if use_tls {
                 match acceptor.accept(stream).await {
-                    Ok(tlsStream) => {
+                    Ok(tls_stream) => {
                         if let Err(e) =
-                            handleConnection(tlsStream, masterNode, token, addr.to_string()).await
+                            handle_connection(tls_stream, master_node, token, addr.to_string()).await
                         {
                             eprintln!("TLS connection error: {:?}", e);
                         }
@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     Err(e) => eprintln!("TLS accept failed: {:?}", e),
                 }
             } else if let Err(e) =
-                handleConnection(stream, masterNode, token, addr.to_string()).await
+                handle_connection(stream, master_node, token, addr.to_string()).await
             {
                 eprintln!("Connection error: {:?}", e);
             }
@@ -106,9 +106,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 }
 
-async fn handleConnection<S>(
+async fn handle_connection<S>(
     mut socket: S,
-    masterNode: Arc<MasterNode>,
+    master_node: Arc<MasterNode>,
     token: String,
     addr: String,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
@@ -128,7 +128,7 @@ where
         socket.write_all(b"OK").await?;
 
         // Füge die Node zur verbundenen Liste hinzu
-        masterNode.connectedNodes.lock().unwrap().insert(
+        master_node.connected_nodes.lock().unwrap().insert(
             addr.clone(),
             NodeInfo {
                 addr: addr.clone(),
@@ -137,7 +137,7 @@ where
                 active_tasks: HashMap::new(),
             },
         );
-        saveState(&masterNode);
+        save_state(&master_node);
 
         loop {
             let mut buf = [0; 1024];
@@ -151,31 +151,31 @@ where
             match request {
                 NodeMessage::GetConnectedNodes => {
                     // Sende die Liste aller verbundenen Nodes
-                    let connectedNodes = masterNode
-                        .connectedNodes
+                    let connected_nodes = master_node
+                        .connected_nodes
                         .lock()
                         .unwrap()
                         .keys()
                         .cloned()
                         .collect::<Vec<String>>();
 
-                    let response = NodeMessage::ConnectedNodes(connectedNodes);
+                    let response = NodeMessage::ConnectedNodes(connected_nodes);
                     let response_data = serde_json::to_vec(&response)?;
                     socket.write_all(&response_data).await?;
                     println!("Sent connected nodes list to client");
                 }
                 NodeMessage::RequestConnection(target_id) => {
                     // Prüfe, ob ein freier Port verfügbar ist
-                    if let Some(port) = allocatePort(&masterNode) {
-                        masterNode
-                            .connectedNodes
+                    if let Some(port) = allocate_port(&master_node) {
+                        master_node
+                            .connected_nodes
                             .lock()
                             .unwrap()
                             .entry(addr.clone())
                             .and_modify(|n| n.port = Some(port));
                         // Hole die Adresse der Ziel-Node
-                        let target_addr = masterNode
-                            .connectedNodes
+                        let target_addr = master_node
+                            .connected_nodes
                             .lock()
                             .unwrap()
                             .get(&target_id)
@@ -198,37 +198,37 @@ where
                 NodeMessage::Disconnect => {
                     // Entferne die Node und gebe den Port frei
                     println!("Node disconnected and port released.");
-                    releasePort(&masterNode, addr.clone());
-                    masterNode.connectedNodes.lock().unwrap().remove(&addr);
-                    saveState(&masterNode);
+                    release_port(&master_node, addr.clone());
+                    master_node.connected_nodes.lock().unwrap().remove(&addr);
+                    save_state(&master_node);
                     break;
                 }
                 NodeMessage::Heartbeat => {
-                    masterNode
-                        .connectedNodes
+                    master_node
+                        .connected_nodes
                         .lock()
                         .unwrap()
                         .entry(addr.clone())
                         .and_modify(|n| n.last_heartbeat = now_ms());
                 }
                 NodeMessage::TaskResult { id, .. } => {
-                    masterNode
-                        .connectedNodes
+                    master_node
+                        .connected_nodes
                         .lock()
                         .unwrap()
                         .entry(addr.clone())
                         .and_modify(|n| {
                             n.active_tasks.remove(&id);
                         });
-                    masterNode.pending_tasks.lock().unwrap().remove(&id);
+                    master_node.pending_tasks.lock().unwrap().remove(&id);
                 }
                 _ => println!("Unknown request"),
             }
         }
 
         // Entferne die Node aus der Liste der verbundenen Nodes
-        masterNode.connectedNodes.lock().unwrap().remove(&addr);
-        saveState(&masterNode);
+        master_node.connected_nodes.lock().unwrap().remove(&addr);
+        save_state(&master_node);
     } else {
         println!("Client provided an invalid token {}", received_token);
         socket.write_all(b"Invalid token").await?;
@@ -237,26 +237,26 @@ where
     Ok(())
 }
 
-fn generateToken() -> String {
+fn generate_token() -> String {
     Uuid::new_v4().to_string()
 }
 
-fn allocatePort(masterNode: &MasterNode) -> Option<u16> {
-    let mut ports = masterNode.availablePorts.lock().unwrap();
+fn allocate_port(master_node: &MasterNode) -> Option<u16> {
+    let mut ports = master_node.available_ports.lock().unwrap();
     ports.iter().cloned().next().map(|port| {
         ports.remove(&port);
-        saveState(masterNode);
+        save_state(master_node);
         port
     })
 }
 
-fn releasePort(masterNode: &MasterNode, addr: String) {
-    if let Some(mut info) = masterNode.connectedNodes.lock().unwrap().get_mut(&addr) {
+fn release_port(master_node: &MasterNode, addr: String) {
+    if let Some(mut info) = master_node.connected_nodes.lock().unwrap().get_mut(&addr) {
         if let Some(port) = info.port.take() {
-            masterNode.availablePorts.lock().unwrap().insert(port);
+            master_node.available_ports.lock().unwrap().insert(port);
         }
     }
-    saveState(masterNode);
+    save_state(master_node);
 }
 
 fn now_ms() -> u64 {
@@ -266,12 +266,12 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn cleanupDeadNodes(master: &MasterNode) {
+fn cleanup_dead_nodes(master: &MasterNode) {
     let timeout = master.failover_timeout_ms * 2;
     let now = now_ms();
     let mut stale = Vec::new();
     {
-        let nodes = master.connectedNodes.lock().unwrap();
+        let nodes = master.connected_nodes.lock().unwrap();
         for (addr, info) in nodes.iter() {
             if now.saturating_sub(info.last_heartbeat) > timeout {
                 stale.push(addr.clone());
@@ -280,18 +280,18 @@ fn cleanupDeadNodes(master: &MasterNode) {
     }
     for addr in stale {
         println!("Node {} timed out", addr);
-        if let Some(info) = master.connectedNodes.lock().unwrap().remove(&addr) {
+        if let Some(info) = master.connected_nodes.lock().unwrap().remove(&addr) {
             let mut pending = master.pending_tasks.lock().unwrap();
             for (id, task) in info.active_tasks {
                 pending.insert(id, task);
             }
         }
-        releasePort(master, addr);
+        release_port(master, addr);
     }
-    saveState(master);
+    save_state(master);
 }
 
-fn generateTlsConfig() -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sync>> {
+fn generate_tls_config() -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sync>> {
     let cert = generate_simple_self_signed(vec!["localhost".to_string()])?;
     let cert_der = cert.serialize_der()?;
     let key_der = cert.serialize_private_key_der();
@@ -312,21 +312,21 @@ struct MasterState {
     pending_tasks: HashMap<String, Task>,
 }
 
-fn loadState(master: &MasterNode) {
+fn load_state(master: &MasterNode) {
     if let Ok(data) = fs::read_to_string("master_state.json") {
         if let Ok(state) = serde_json::from_str::<MasterState>(&data) {
-            *master.connectedNodes.lock().unwrap() = state.connected_nodes;
-            *master.availablePorts.lock().unwrap() = state.available_ports.into_iter().collect();
+            *master.connected_nodes.lock().unwrap() = state.connected_nodes;
+            *master.available_ports.lock().unwrap() = state.available_ports.into_iter().collect();
             *master.pending_tasks.lock().unwrap() = state.pending_tasks;
         }
     }
 }
 
-fn saveState(master: &MasterNode) {
+fn save_state(master: &MasterNode) {
     let state = MasterState {
-        connected_nodes: master.connectedNodes.lock().unwrap().clone(),
+        connected_nodes: master.connected_nodes.lock().unwrap().clone(),
         available_ports: master
-            .availablePorts
+            .available_ports
             .lock()
             .unwrap()
             .iter()

@@ -37,7 +37,7 @@ pub enum NodeMessage {
 }
 
 /// Determine if an IP address is part of a private local network.
-pub fn isLocalIp(ip: &str) -> bool {
+pub fn is_local_ip(ip: &str) -> bool {
     if let Ok(addr) = ip.parse::<std::net::IpAddr>() {
         match addr {
             std::net::IpAddr::V4(v4) => {
@@ -76,26 +76,26 @@ pub fn isLocalIp(ip: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::isLocalIp;
+    use super::is_local_ip;
 
     #[test]
     fn detects_private_ipv4() {
-        assert!(isLocalIp("10.1.2.3"));
-        assert!(isLocalIp("172.16.0.1"));
-        assert!(isLocalIp("192.168.5.6"));
-        assert!(isLocalIp("127.0.0.1"));
+        assert!(is_local_ip("10.1.2.3"));
+        assert!(is_local_ip("172.16.0.1"));
+        assert!(is_local_ip("192.168.5.6"));
+        assert!(is_local_ip("127.0.0.1"));
     }
 
     #[test]
     fn detects_public_ipv4() {
-        assert!(!isLocalIp("8.8.8.8"));
-        assert!(!isLocalIp("1.2.3.4"));
+        assert!(!is_local_ip("8.8.8.8"));
+        assert!(!is_local_ip("1.2.3.4"));
     }
 
     #[test]
     fn detects_ipv6() {
-        assert!(isLocalIp("::1"));
-        assert!(isLocalIp("fc00::1"));
-        assert!(!isLocalIp("2001:4860:4860::8888"));
+        assert!(is_local_ip("::1"));
+        assert!(is_local_ip("fc00::1"));
+        assert!(!is_local_ip("2001:4860:4860::8888"));
     }
 }
