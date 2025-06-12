@@ -1,5 +1,6 @@
 use cpcluster_common::config::Config;
 use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, Task};
+use cpcluster_common::{read_length_prefixed, write_length_prefixed};
 use rcgen::generate_simple_self_signed;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -48,7 +49,7 @@ where
                 task,
             };
             let data = serde_json::to_vec(&msg)?;
-            socket.write_all(&data).await?;
+            write_length_prefixed(socket, &data).await?;
         } else {
             break;
         }
@@ -192,17 +193,15 @@ async fn handle_connection<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let mut buf = [0; 1024];
-    let n = socket.read(&mut buf).await?;
-
-    let received_token = std::str::from_utf8(&buf[..n])?.trim().to_string();
+    let token_bytes = read_length_prefixed(&mut socket).await?;
+    let received_token = String::from_utf8(token_bytes)?.trim().to_string();
     if received_token == token {
         println!("Client authenticated with correct token");
 
         // Inform the client that authentication succeeded so it can
         // continue with the protocol. Without this message the client
         // would block waiting for a response.
-        socket.write_all(b"OK").await?;
+        write_length_prefixed(&mut socket, b"OK").await?;
 
         // Füge die Node zur verbundenen Liste hinzu
         master_node.connected_nodes.lock().unwrap().insert(
@@ -221,14 +220,15 @@ where
         }
 
         loop {
-            let mut buf = [0; 1024];
-            let n = socket.read(&mut buf).await?;
-            if n == 0 {
-                println!("Client disconnected");
-                break;
-            }
+            let data = match read_length_prefixed(&mut socket).await {
+                Ok(d) => d,
+                Err(_) => {
+                    println!("Client disconnected");
+                    break;
+                }
+            };
 
-            let request: NodeMessage = serde_json::from_slice(&buf[..n])?;
+            let request: NodeMessage = serde_json::from_slice(&data)?;
             match request {
                 NodeMessage::GetConnectedNodes => {
                     // Sende die Liste aller verbundenen Nodes
@@ -242,7 +242,7 @@ where
 
                     let response = NodeMessage::ConnectedNodes(connected_nodes);
                     let response_data = serde_json::to_vec(&response)?;
-                    socket.write_all(&response_data).await?;
+                    write_length_prefixed(&mut socket, &response_data).await?;
                     println!("Sent connected nodes list to client");
                 }
                 NodeMessage::RequestConnection(target_id) => {
@@ -267,7 +267,7 @@ where
                             // Sende die Verbindungsinformation an die anfragende Node
                             let response = NodeMessage::ConnectionInfo(target_addr, port);
                             let response_data = serde_json::to_vec(&response)?;
-                            socket.write_all(&response_data).await?;
+                            write_length_prefixed(&mut socket, &response_data).await?;
                             println!("Connection info sent to {} on port {}", target_id, port);
                         } else {
                             println!("Target Node not found");
@@ -316,7 +316,7 @@ where
         save_state(&master_node);
     } else {
         println!("Client provided an invalid token {}", received_token);
-        socket.write_all(b"Invalid token").await?;
+        write_length_prefixed(&mut socket, b"Invalid token").await?;
     }
 
     Ok(())

@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 pub mod config;
 pub use config::Config;
 
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
 #[derive(Serialize, Deserialize)]
 pub struct JoinInfo {
     pub token: String,
@@ -34,6 +36,35 @@ pub enum NodeMessage {
     AssignTask { id: String, task: Task },
     TaskResult { id: String, result: TaskResult },
     DirectMessage(String),
+}
+
+/// Write a length-prefixed binary message to the provided async writer.
+pub async fn write_length_prefixed<S>(
+    stream: &mut S,
+    data: &[u8],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    S: AsyncWrite + Unpin,
+{
+    let len = data.len() as u32;
+    stream.write_all(&len.to_be_bytes()).await?;
+    stream.write_all(data).await?;
+    Ok(())
+}
+
+/// Read a length-prefixed binary message from the provided async reader.
+pub async fn read_length_prefixed<S>(
+    stream: &mut S,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>>
+where
+    S: AsyncRead + Unpin,
+{
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).await?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf).await?;
+    Ok(buf)
 }
 
 /// Determine if an IP address is part of a private local network.
