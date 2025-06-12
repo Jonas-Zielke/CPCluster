@@ -99,6 +99,16 @@ CPCluster is a distributed network of nodes that communicate with each other for
 4. **Handling Disconnection**:
    - If a node disconnects, the master releases the assigned port for future connections and notifies the other node if necessary.
 
+### Master Shell
+
+When the master node starts it opens an interactive shell. Besides `nodes` and
+`tasks` you can queue new work with `addtask`:
+
+```bash
+addtask compute 1+2
+addtask http https://example.com
+```
+
 ## Code Structure
 
 ### Master Node (`CPCluster_masterNode/src/main.rs`)

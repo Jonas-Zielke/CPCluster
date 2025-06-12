@@ -127,7 +127,7 @@ fn run_shell(master: Arc<MasterNode>) {
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
     println!(
-        "CPCluster shell ready.\nCommands:\n  nodes  - list connected nodes\n  tasks  - list active and pending tasks\n  exit   - quit"
+        "CPCluster shell ready.\nCommands:\n  nodes                - list connected nodes\n  tasks                - list active and pending tasks\n  addtask <type> <arg> - queue a task (type: compute|http)\n  exit                 - quit"
     );
     print!("> ");
     let _ = std::io::stdout().flush();
@@ -165,6 +165,37 @@ fn run_shell(master: Arc<MasterNode>) {
                         for (id, task) in pending.iter() {
                             println!("{} -> {:?}", id, task);
                         }
+                    }
+                }
+                cmd if cmd.trim_start().starts_with("addtask") => {
+                    let parts: Vec<&str> = cmd.trim().splitn(3, ' ').collect();
+                    if parts.len() < 3 {
+                        println!(
+                            "Usage: addtask compute <expression> | addtask http <url>"
+                        );
+                    } else {
+                        let id = uuid::Uuid::new_v4().to_string();
+                        let task = match parts[1] {
+                            "compute" => Task::Compute {
+                                expression: parts[2].to_string(),
+                            },
+                            "http" => Task::HttpRequest {
+                                url: parts[2].to_string(),
+                            },
+                            _ => {
+                                println!(
+                                    "Unknown task type. Use 'compute' or 'http'."
+                                );
+                                continue;
+                            }
+                        };
+                        master
+                            .pending_tasks
+                            .lock()
+                            .unwrap()
+                            .insert(id.clone(), task);
+                        save_state(&master);
+                        println!("Queued task {}", id);
                     }
                 }
                 "exit" | "quit" => {
