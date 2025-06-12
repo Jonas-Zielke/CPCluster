@@ -1,5 +1,5 @@
 use cpcluster_common::config::Config;
-use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, Task};
+use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, Task, TaskResult};
 use cpcluster_common::{read_length_prefixed, write_length_prefixed};
 use log::{error, info, warn};
 use rcgen::generate_simple_self_signed;
@@ -94,6 +94,7 @@ struct MasterNode {
     available_ports: Arc<Mutex<HashSet<u16>>>,              // verwaltet verfügbare Ports
     failover_timeout_ms: u64,
     pending_tasks: Arc<Mutex<HashMap<String, Task>>>,
+    completed_tasks: Arc<Mutex<HashMap<String, TaskResult>>>,
 }
 
 fn assign_tasks_to_nodes(master: &MasterNode) {
@@ -127,7 +128,7 @@ fn run_shell(master: Arc<MasterNode>) {
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
     println!(
-        "CPCluster shell ready.\nCommands:\n  nodes                - list connected nodes\n  tasks                - list active and pending tasks\n  addtask <type> <arg> - queue a task (type: compute|http)\n  exit                 - quit"
+        "CPCluster shell ready.\nCommands:\n  nodes                - list connected nodes\n  tasks                - list active and pending tasks\n  task <id>            - show status or result of a task\n  addtask <type> <arg> - queue a task (type: compute|http)\n  exit                 - quit"
     );
     print!("> ");
     let _ = std::io::stdout().flush();
@@ -166,13 +167,45 @@ fn run_shell(master: Arc<MasterNode>) {
                             println!("{} -> {:?}", id, task);
                         }
                     }
+                    drop(pending);
+                    let completed = master.completed_tasks.lock().unwrap();
+                    if completed.is_empty() {
+                        println!("No completed tasks");
+                    } else {
+                        println!("Completed tasks:");
+                        for (id, res) in completed.iter() {
+                            println!("{} -> {:?}", id, res);
+                        }
+                    }
+                }
+                cmd if cmd.trim_start().starts_with("task") => {
+                    let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
+                    if parts.len() != 2 {
+                        println!("Usage: task <id>");
+                    } else {
+                        let id = parts[1];
+                        if master.pending_tasks.lock().unwrap().contains_key(id) {
+                            println!("Task {} is pending", id);
+                        } else if master
+                            .connected_nodes
+                            .lock()
+                            .unwrap()
+                            .values()
+                            .any(|n| n.active_tasks.contains_key(id))
+                        {
+                            println!("Task {} is running", id);
+                        } else if let Some(result) = master.completed_tasks.lock().unwrap().get(id)
+                        {
+                            println!("Task {} finished: {:?}", id, result);
+                        } else {
+                            println!("Task {} not found", id);
+                        }
+                    }
                 }
                 cmd if cmd.trim_start().starts_with("addtask") => {
                     let parts: Vec<&str> = cmd.trim().splitn(3, ' ').collect();
                     if parts.len() < 3 {
-                        println!(
-                            "Usage: addtask compute <expression> | addtask http <url>"
-                        );
+                        println!("Usage: addtask compute <expression> | addtask http <url>");
                     } else {
                         let id = uuid::Uuid::new_v4().to_string();
                         let task = match parts[1] {
@@ -183,9 +216,7 @@ fn run_shell(master: Arc<MasterNode>) {
                                 url: parts[2].to_string(),
                             },
                             _ => {
-                                println!(
-                                    "Unknown task type. Use 'compute' or 'http'."
-                                );
+                                println!("Unknown task type. Use 'compute' or 'http'.");
                                 continue;
                             }
                         };
@@ -262,6 +293,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         available_ports: Arc::new(Mutex::new((config.min_port..=config.max_port).collect())),
         failover_timeout_ms: config.failover_timeout_ms,
         pending_tasks: Arc::new(Mutex::new(HashMap::new())),
+        completed_tasks: Arc::new(Mutex::new(HashMap::new())),
     });
     load_state(&master_node);
 
@@ -420,7 +452,7 @@ where
                     write_length_prefixed(&mut socket, &ack).await?;
                     info!("Heartbeat received from {}", addr);
                 }
-                NodeMessage::TaskResult { id, .. } => {
+                NodeMessage::TaskResult { id, result } => {
                     master_node
                         .connected_nodes
                         .lock()
@@ -430,6 +462,11 @@ where
                             n.active_tasks.remove(&id);
                         });
                     master_node.pending_tasks.lock().unwrap().remove(&id);
+                    master_node
+                        .completed_tasks
+                        .lock()
+                        .unwrap()
+                        .insert(id.clone(), result);
                     save_state(&master_node);
                 }
                 _ => warn!("Unknown request"),
@@ -556,6 +593,8 @@ struct MasterState {
     connected_nodes: HashMap<String, NodeInfo>,
     available_ports: Vec<u16>,
     pending_tasks: HashMap<String, Task>,
+    #[serde(default)]
+    completed_tasks: HashMap<String, TaskResult>,
 }
 
 fn load_state(master: &MasterNode) {
@@ -564,6 +603,7 @@ fn load_state(master: &MasterNode) {
             *master.connected_nodes.lock().unwrap() = state.connected_nodes;
             *master.available_ports.lock().unwrap() = state.available_ports.into_iter().collect();
             *master.pending_tasks.lock().unwrap() = state.pending_tasks;
+            *master.completed_tasks.lock().unwrap() = state.completed_tasks;
         }
     }
     assign_tasks_to_nodes(master);
@@ -580,6 +620,7 @@ fn save_state(master: &MasterNode) {
             .cloned()
             .collect(),
         pending_tasks: master.pending_tasks.lock().unwrap().clone(),
+        completed_tasks: master.completed_tasks.lock().unwrap().clone(),
     };
     if let Ok(data) = serde_json::to_string_pretty(&state) {
         let _ = fs::write("master_state.json", data);
