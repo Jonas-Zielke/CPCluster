@@ -102,7 +102,8 @@ CPCluster is a distributed network of nodes that communicate with each other for
 ### Master Shell
 
 When the master node starts it opens an interactive shell. Besides `nodes` and
-`tasks` you can queue new work with `addtask`:
+`tasks` you can check the status of a specific job with `task <id>` or queue new
+work with `addtask`:
 
 ```bash
 addtask compute 1+2
