@@ -14,6 +14,48 @@ use tokio::net::TcpListener;
 use tokio_rustls::{rustls, TlsAcceptor};
 use uuid::Uuid;
 
+async fn send_pending_tasks<S>(
+    socket: &mut S,
+    master: &MasterNode,
+    addr: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    loop {
+        let task = {
+            let mut pending = master.pending_tasks.lock().unwrap();
+            if let Some((id, task)) = pending.iter().next().map(|(i, t)| (i.clone(), t.clone())) {
+                pending.remove(&id);
+                Some((id, task))
+            } else {
+                None
+            }
+        };
+
+        if let Some((id, task)) = task {
+            master
+                .connected_nodes
+                .lock()
+                .unwrap()
+                .entry(addr.to_string())
+                .and_modify(|n| {
+                    n.active_tasks.insert(id.clone(), task.clone());
+                });
+
+            let msg = NodeMessage::AssignTask {
+                id: id.clone(),
+                task,
+            };
+            let data = serde_json::to_vec(&msg)?;
+            socket.write_all(&data).await?;
+        } else {
+            break;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct NodeInfo {
     addr: String,
@@ -28,6 +70,32 @@ struct MasterNode {
     available_ports: Arc<Mutex<HashSet<u16>>>,              // verwaltet verfügbare Ports
     failover_timeout_ms: u64,
     pending_tasks: Arc<Mutex<HashMap<String, Task>>>,
+}
+
+fn assign_tasks_to_nodes(master: &MasterNode) {
+    let tasks: Vec<(String, Task)> = {
+        master
+            .pending_tasks
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(id, t)| (id.clone(), t.clone()))
+            .collect()
+    };
+    if tasks.is_empty() {
+        return;
+    }
+    let mut nodes = master.connected_nodes.lock().unwrap();
+    if nodes.is_empty() {
+        return;
+    }
+    let keys: Vec<String> = nodes.keys().cloned().collect();
+    for (i, (id, task)) in tasks.into_iter().enumerate() {
+        let key = &keys[i % keys.len()];
+        if let Some(node) = nodes.get_mut(key) {
+            node.active_tasks.entry(id).or_insert(task);
+        }
+    }
 }
 
 #[tokio::main]
@@ -98,7 +166,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 match acceptor.accept(stream).await {
                     Ok(tls_stream) => {
                         if let Err(e) =
-                            handle_connection(tls_stream, master_node, token, addr.to_string()).await
+                            handle_connection(tls_stream, master_node, token, addr.to_string())
+                                .await
                         {
                             eprintln!("TLS connection error: {:?}", e);
                         }
@@ -146,6 +215,10 @@ where
             },
         );
         save_state(&master_node);
+        // assign any pending tasks to this node immediately
+        if let Err(e) = send_pending_tasks(&mut socket, &master_node, &addr).await {
+            eprintln!("Failed to send pending tasks: {}", e);
+        }
 
         loop {
             let mut buf = [0; 1024];
@@ -231,6 +304,10 @@ where
                     master_node.pending_tasks.lock().unwrap().remove(&id);
                 }
                 _ => println!("Unknown request"),
+            }
+            // try to dispatch new tasks that might be pending
+            if let Err(e) = send_pending_tasks(&mut socket, &master_node, &addr).await {
+                eprintln!("Failed to send pending tasks: {}", e);
             }
         }
 
@@ -349,6 +426,7 @@ fn load_state(master: &MasterNode) {
             *master.pending_tasks.lock().unwrap() = state.pending_tasks;
         }
     }
+    assign_tasks_to_nodes(master);
 }
 
 fn save_state(master: &MasterNode) {
@@ -366,4 +444,5 @@ fn save_state(master: &MasterNode) {
     if let Ok(data) = serde_json::to_string_pretty(&state) {
         let _ = fs::write("master_state.json", data);
     }
+    assign_tasks_to_nodes(master);
 }
