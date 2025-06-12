@@ -11,3 +11,20 @@
 5. Gracefully disconnect from the master with `NodeMessage::Disconnect`.
 
 The node also uses `tokio` for asynchronous I/O and relies on `cpcluster_common` for shared message definitions.
+
+## Heartbeat and Failover
+
+Nodes send a `Heartbeat` message to the master every `failover_timeout_ms` milliseconds. If the master does not receive a heartbeat within twice this period it removes the node and re-queues its tasks. Nodes attempt to reconnect using all addresses in `master_addresses` until one responds.
+
+## Task Examples
+
+Nodes can execute compute expressions or HTTP requests. For example:
+
+```rust
+use cpcluster_common::Task;
+
+let compute = Task::Compute { expression: "1 + 2".into() };
+let request = Task::HttpRequest { url: "https://example.com".into() };
+```
+
+`TaskResult::Number(3.0)` or `TaskResult::Response` will be returned respectively.
