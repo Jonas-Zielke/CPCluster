@@ -1,5 +1,5 @@
 use cpcluster_common::config::Config;
-use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, Task};
+use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, Task, TaskResult};
 use cpcluster_common::{read_length_prefixed, write_length_prefixed};
 use log::{error, info, warn};
 use rcgen::generate_simple_self_signed;
@@ -94,6 +94,7 @@ struct MasterNode {
     available_ports: Arc<Mutex<HashSet<u16>>>,              // verwaltet verfügbare Ports
     failover_timeout_ms: u64,
     pending_tasks: Arc<Mutex<HashMap<String, Task>>>,
+    task_results: Arc<Mutex<HashMap<String, TaskResult>>>,
 }
 
 fn assign_tasks_to_nodes(master: &MasterNode) {
@@ -127,7 +128,7 @@ fn run_shell(master: Arc<MasterNode>) {
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
     println!(
-        "CPCluster shell ready.\nCommands:\n  nodes  - list connected nodes\n  tasks  - list active and pending tasks\n  exit   - quit"
+        "CPCluster shell ready.\nCommands:\n  nodes                - list connected nodes\n  tasks                - list active and pending tasks\n  addtask <type> <arg> - queue a task (type: compute|http)\n  results              - list finished task results\n  result <id>          - show a single task result\n  exit                 - quit"
     );
     print!("> ");
     let _ = std::io::stdout().flush();
@@ -164,6 +165,56 @@ fn run_shell(master: Arc<MasterNode>) {
                         println!("Pending tasks:");
                         for (id, task) in pending.iter() {
                             println!("{} -> {:?}", id, task);
+                        }
+                    }
+                }
+                cmd if cmd.trim_start().starts_with("addtask") => {
+                    let parts: Vec<&str> = cmd.trim().splitn(3, ' ').collect();
+                    if parts.len() < 3 {
+                        println!("Usage: addtask compute <expression> | addtask http <url>");
+                    } else {
+                        let id = uuid::Uuid::new_v4().to_string();
+                        let task = match parts[1] {
+                            "compute" => Task::Compute {
+                                expression: parts[2].to_string(),
+                            },
+                            "http" => Task::HttpRequest {
+                                url: parts[2].to_string(),
+                            },
+                            _ => {
+                                println!("Unknown task type. Use 'compute' or 'http'.");
+                                continue;
+                            }
+                        };
+                        master
+                            .pending_tasks
+                            .lock()
+                            .unwrap()
+                            .insert(id.clone(), task);
+                        save_state(&master);
+                        println!("Queued task {}", id);
+                    }
+                }
+                "results" => {
+                    let results = master.task_results.lock().unwrap();
+                    if results.is_empty() {
+                        println!("No task results available");
+                    } else {
+                        for (id, res) in results.iter() {
+                            println!("{} -> {:?}", id, res);
+                        }
+                    }
+                }
+                cmd if cmd.trim_start().starts_with("result") => {
+                    let parts: Vec<&str> = cmd.trim().splitn(2, ' ').collect();
+                    if parts.len() < 2 {
+                        println!("Usage: result <task_id>");
+                    } else {
+                        let id = parts[1];
+                        let res = master.task_results.lock().unwrap().get(id).cloned();
+                        match res {
+                            Some(r) => println!("{:?}", r),
+                            None => println!("No result for task {}", id),
                         }
                     }
                 }
@@ -231,6 +282,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         available_ports: Arc::new(Mutex::new((config.min_port..=config.max_port).collect())),
         failover_timeout_ms: config.failover_timeout_ms,
         pending_tasks: Arc::new(Mutex::new(HashMap::new())),
+        task_results: Arc::new(Mutex::new(HashMap::new())),
     });
     load_state(&master_node);
 
@@ -389,7 +441,7 @@ where
                     write_length_prefixed(&mut socket, &ack).await?;
                     info!("Heartbeat received from {}", addr);
                 }
-                NodeMessage::TaskResult { id, .. } => {
+                NodeMessage::TaskResult { id, result } => {
                     master_node
                         .connected_nodes
                         .lock()
@@ -399,6 +451,11 @@ where
                             n.active_tasks.remove(&id);
                         });
                     master_node.pending_tasks.lock().unwrap().remove(&id);
+                    master_node
+                        .task_results
+                        .lock()
+                        .unwrap()
+                        .insert(id.clone(), result);
                     save_state(&master_node);
                 }
                 _ => warn!("Unknown request"),
@@ -525,6 +582,7 @@ struct MasterState {
     connected_nodes: HashMap<String, NodeInfo>,
     available_ports: Vec<u16>,
     pending_tasks: HashMap<String, Task>,
+    task_results: HashMap<String, TaskResult>,
 }
 
 fn load_state(master: &MasterNode) {
@@ -533,6 +591,7 @@ fn load_state(master: &MasterNode) {
             *master.connected_nodes.lock().unwrap() = state.connected_nodes;
             *master.available_ports.lock().unwrap() = state.available_ports.into_iter().collect();
             *master.pending_tasks.lock().unwrap() = state.pending_tasks;
+            *master.task_results.lock().unwrap() = state.task_results;
         }
     }
     assign_tasks_to_nodes(master);
@@ -549,6 +608,7 @@ fn save_state(master: &MasterNode) {
             .cloned()
             .collect(),
         pending_tasks: master.pending_tasks.lock().unwrap().clone(),
+        task_results: master.task_results.lock().unwrap().clone(),
     };
     if let Ok(data) = serde_json::to_string_pretty(&state) {
         let _ = fs::write("master_state.json", data);
