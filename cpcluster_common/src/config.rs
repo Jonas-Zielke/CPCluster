@@ -23,7 +23,8 @@ impl Default for Config {
 impl Config {
     pub fn load(path: &str) -> std::io::Result<Self> {
         match fs::read_to_string(path) {
-            Ok(data) => serde_json::from_str(&data).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+            Ok(data) => serde_json::from_str(&data)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
             Err(_) => Ok(Config::default()),
         }
     }

@@ -11,6 +11,18 @@
   - `GetConnectedNodes` and `ConnectedNodes(Vec<String>)` – request and response for the list of nodes currently in the cluster.
   - `Disconnect` – tells the master a node is leaving.
   - `Heartbeat` – periodic keep-alive message sent by the nodes.
+  - `AssignTask { id, task }` – instructs a peer to execute a `Task`.
+  - `TaskResult { id, result }` – result of a task execution.
+  - `DirectMessage(String)` – simple string message between peers.
+
+- `Task` – represents work sent between nodes:
+  - `Compute { expression }` – evaluate a mathematical expression.
+  - `HttpRequest { url }` – perform a HTTP GET request.
+
+- `TaskResult` – returned from task execution:
+  - `Number(f64)` – result of a computation.
+  - `Response(String)` – body of an HTTP request.
+  - `Error(String)` – task failed with this error.
 
 These types are `serde` serializable and are used by both the `cpcluster_masternode` and `cpcluster_node` crates.
 

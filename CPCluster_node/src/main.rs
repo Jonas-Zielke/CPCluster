@@ -1,9 +1,15 @@
-use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage};
 use cpcluster_common::config::Config;
-use std::{error::Error, fs, sync::Arc};
+use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage, Task, TaskResult};
+use meval::eval_str;
+use reqwest::Client;
+use std::{
+    error::Error,
+    fs,
+    sync::{Arc, Mutex},
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    net::TcpStream,
+    net::{TcpListener, TcpStream},
 };
 use tokio_rustls::{rustls, TlsConnector};
 
@@ -34,7 +40,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = Config::load("config.json").unwrap_or_default();
 
     let mut stream: Option<Box<dyn ReadWrite + Unpin + Send>> = None;
-    let mut open_tasks: Vec<NodeMessage> = Vec::new();
+    let open_tasks: Arc<Mutex<Vec<NodeMessage>>> = Arc::new(Mutex::new(Vec::new()));
     for addr in &config.master_addresses {
         match connect(addr, isLocalIp(&joinInfo.ip), &joinInfo.ip).await {
             Ok(s) => {
@@ -84,6 +90,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let response: NodeMessage = serde_json::from_slice(&buf[..n])?;
     if let NodeMessage::ConnectedNodes(nodes) = response {
         println!("Currently connected nodes in the network: {:?}", nodes);
+        if let Some(peer) = nodes.first() {
+            sendMessage(&mut stream, NodeMessage::RequestConnection(peer.clone())).await?;
+        }
     }
 
     // Periodic heartbeat loop
@@ -101,6 +110,30 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 }
             }
         }
+
+        let mut buf = vec![0; 1024];
+        if let Ok(Ok(n)) =
+            tokio::time::timeout(std::time::Duration::from_millis(100), stream.read(&mut buf)).await
+        {
+            if n == 0 {
+                println!("Master closed the connection");
+                break;
+            }
+            if let Ok(msg) = serde_json::from_slice::<NodeMessage>(&buf[..n]) {
+                match msg {
+                    NodeMessage::ConnectionInfo(target, port) => {
+                        let tasks = open_tasks.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = handle_connection(target, port, tasks).await {
+                                eprintln!("Direct connection error: {}", e);
+                            }
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         tokio::time::sleep(std::time::Duration::from_millis(config.failover_timeout_ms)).await;
     }
 
@@ -148,7 +181,7 @@ async fn connect(
 async fn reconnect(
     join_info: &JoinInfo,
     config: &Config,
-    open_tasks: &[NodeMessage],
+    open_tasks: &Arc<Mutex<Vec<NodeMessage>>>,
 ) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
     for addr in &config.master_addresses {
         match connect(addr, isLocalIp(&join_info.ip), &join_info.ip).await {
@@ -172,7 +205,9 @@ async fn reconnect(
                     let mut buf = vec![0; 1024];
                     if let Ok(n) = s.read(&mut buf).await {
                         if n > 0 {
-                            if let Ok(NodeMessage::ConnectedNodes(nodes)) = serde_json::from_slice(&buf[..n]) {
+                            if let Ok(NodeMessage::ConnectedNodes(nodes)) =
+                                serde_json::from_slice(&buf[..n])
+                            {
                                 println!("Currently connected nodes in the network: {:?}", nodes);
                             }
                         }
@@ -180,7 +215,8 @@ async fn reconnect(
                 }
 
                 // resend open tasks
-                for task in open_tasks {
+                let tasks = open_tasks.lock().unwrap().clone();
+                for task in tasks {
                     if let Err(e) = sendMessage(&mut s, task.clone()).await {
                         println!("Failed to resend task: {}", e);
                     }
@@ -198,4 +234,82 @@ async fn reconnect(
         std::io::ErrorKind::Other,
         "Unable to reconnect to any master node",
     )))
+}
+
+async fn handle_connection(
+    target: String,
+    port: u16,
+    tasks: Arc<Mutex<Vec<NodeMessage>>>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let addr = format!("{}:{}", target, port);
+    let use_tls = !isLocalIp(&target);
+    let listener = TcpListener::bind(("0.0.0.0", port)).await?;
+
+    let connect_fut = TcpStream::connect(&addr);
+    let mut stream: Box<dyn ReadWrite + Unpin + Send>;
+    tokio::select! {
+        Ok(sock) = connect_fut => {
+            if use_tls {
+                let config = rustls::ClientConfig::builder()
+                    .with_safe_defaults()
+                    .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
+                    .with_no_client_auth();
+                let connector = TlsConnector::from(Arc::new(config));
+                let server_name = rustls::ServerName::try_from(target.as_str())?;
+                let tls = connector.connect(server_name, sock).await?;
+                stream = Box::new(tls);
+            } else {
+                stream = Box::new(sock);
+            }
+        }
+        Ok((sock, _)) = listener.accept() => {
+            if use_tls {
+                let config = rustls::ClientConfig::builder()
+                    .with_safe_defaults()
+                    .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
+                    .with_no_client_auth();
+                let connector = TlsConnector::from(Arc::new(config));
+                let server_name = rustls::ServerName::try_from(target.as_str())?;
+                let tls = connector.connect(server_name, sock).await?;
+                stream = Box::new(tls);
+            } else {
+                stream = Box::new(sock);
+            }
+        }
+    }
+
+    let client = Client::new();
+    loop {
+        let mut buf = [0u8; 1024];
+        let n = stream.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        if let Ok(NodeMessage::AssignTask { id, task }) = serde_json::from_slice(&buf[..n]) {
+            let result = match task {
+                Task::Compute { expression } => match eval_str(&expression) {
+                    Ok(v) => TaskResult::Number(v),
+                    Err(e) => TaskResult::Error(e.to_string()),
+                },
+                Task::HttpRequest { url } => match client.get(&url).send().await {
+                    Ok(resp) => match resp.text().await {
+                        Ok(text) => TaskResult::Response(text),
+                        Err(e) => TaskResult::Error(e.to_string()),
+                    },
+                    Err(e) => TaskResult::Error(e.to_string()),
+                },
+            };
+            let msg = NodeMessage::TaskResult {
+                id: id.clone(),
+                result,
+            };
+            tasks.lock().unwrap().push(msg.clone());
+            sendMessage(&mut stream, msg.clone()).await?;
+            tasks.lock().unwrap().retain(|m| match m {
+                NodeMessage::TaskResult { id: rid, .. } => rid != &id,
+                _ => true,
+            });
+        }
+    }
+    Ok(())
 }

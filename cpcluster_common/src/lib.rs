@@ -11,6 +11,19 @@ pub struct JoinInfo {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Task {
+    Compute { expression: String },
+    HttpRequest { url: String },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum TaskResult {
+    Number(f64),
+    Response(String),
+    Error(String),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum NodeMessage {
     RequestConnection(String),
     ConnectionInfo(String, u16),
@@ -18,6 +31,9 @@ pub enum NodeMessage {
     ConnectedNodes(Vec<String>),
     Disconnect,
     Heartbeat,
+    AssignTask { id: String, task: Task },
+    TaskResult { id: String, result: TaskResult },
+    DirectMessage(String),
 }
 
 /// Determine if an IP address is part of a private local network.
