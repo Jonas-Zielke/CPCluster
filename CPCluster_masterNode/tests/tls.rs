@@ -1,8 +1,8 @@
 use cpcluster_common::{read_length_prefixed, write_length_prefixed, NodeMessage};
 use rcgen::generate_simple_self_signed;
-use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
-use tokio::{net::TcpListener, io::{AsyncReadExt, AsyncWriteExt}};
+use std::sync::{Arc, Mutex};
+use tokio::net::TcpListener;
 use tokio_rustls::{rustls, TlsAcceptor, TlsConnector};
 
 #[tokio::test]
@@ -14,7 +14,10 @@ async fn tls_handshake() {
     let tls_config = rustls::ServerConfig::builder()
         .with_safe_defaults()
         .with_no_client_auth()
-        .with_single_cert(vec![rustls::Certificate(cert_der.clone())], rustls::PrivateKey(key_der))
+        .with_single_cert(
+            vec![rustls::Certificate(cert_der.clone())],
+            rustls::PrivateKey(key_der),
+        )
         .unwrap();
     let acceptor = TlsAcceptor::from(Arc::new(tls_config));
 

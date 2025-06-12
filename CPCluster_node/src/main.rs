@@ -3,6 +3,7 @@ use cpcluster_common::{
     is_local_ip, read_length_prefixed, write_length_prefixed, JoinInfo, NodeMessage, Task,
     TaskResult,
 };
+use log::{error, info, warn};
 use meval::eval_str;
 use reqwest::Client;
 use rustls_native_certs as native_certs;
@@ -12,7 +13,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncRead, AsyncWrite},
     net::{TcpListener, TcpStream},
 };
 use tokio_rustls::{rustls, TlsConnector};
@@ -22,6 +23,7 @@ impl<T: AsyncRead + AsyncWrite + ?Sized> ReadWrite for T {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    env_logger::init();
     let join_info = fs::read_to_string("join.json")?;
     let join_info: JoinInfo = serde_json::from_str(&join_info)?;
 
@@ -40,12 +42,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .await
         {
             Ok(s) => {
-                println!("Connected to Master Node at {}", addr);
+                info!("Connected to Master Node at {}", addr);
                 stream = Some(s);
                 break;
             }
             Err(e) => {
-                println!("Failed to connect to {}: {}", addr, e);
+                warn!("Failed to connect to {}: {}", addr, e);
             }
         }
     }
@@ -53,22 +55,22 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut stream = match stream {
         Some(s) => s,
         None => {
-            println!("Unable to connect to any master node");
+            error!("Unable to connect to any master node");
             return Ok(());
         }
     };
 
     // Send only the token for authentication
     write_length_prefixed(&mut stream, join_info.token.as_bytes()).await?;
-    println!("Token sent for authentication");
+    info!("Token sent for authentication");
 
     // Read and verify authentication response from the master node
     let auth_response = read_length_prefixed(&mut stream).await?;
     if auth_response == b"Invalid token" {
-        println!("Authentication failed");
+        error!("Authentication failed");
         return Ok(());
     }
-    println!("Authentication successful");
+    info!("Authentication successful");
 
     // Request to get the list of currently connected nodes
     let get_nodes_request = NodeMessage::GetConnectedNodes;
@@ -79,7 +81,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let response: NodeMessage = serde_json::from_slice(&buf)?;
     if let NodeMessage::ConnectedNodes(nodes) = response {
-        println!("Currently connected nodes in the network: {:?}", nodes);
+        info!("Currently connected nodes in the network: {:?}", nodes);
         if let Some(peer) = nodes.first() {
             send_message(&mut stream, NodeMessage::RequestConnection(peer.clone())).await?;
         }
@@ -88,14 +90,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Periodic heartbeat loop
     loop {
         if let Err(e) = send_message(&mut stream, NodeMessage::Heartbeat).await {
-            println!("Heartbeat failed: {}", e);
+            warn!("Heartbeat failed: {}", e);
             match reconnect(&join_info, &config, &open_tasks).await {
                 Ok(s) => {
                     stream = s;
                     continue;
                 }
                 Err(err) => {
-                    println!("Reconnect failed: {}", err);
+                    error!("Reconnect failed: {}", err);
                     break;
                 }
             }
@@ -123,9 +125,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             )
                             .await
                             {
-                                eprintln!("Direct connection error: {}", e);
+                                error!("Direct connection error: {}", e);
                             }
                         });
+                    }
+                    NodeMessage::HeartbeatAck => {
+                        info!("Received heartbeat acknowledgement from master");
                     }
                     _ => {}
                 }
@@ -137,7 +142,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     // Attempt graceful disconnect if still connected
     let _ = send_message(&mut stream, NodeMessage::Disconnect).await;
-    println!("Disconnected from Master Node");
+    info!("Disconnected from Master Node");
 
     Ok(())
 }
@@ -151,7 +156,7 @@ where
 {
     let msg_data = serde_json::to_vec(&msg)?;
     write_length_prefixed(stream, &msg_data).await?;
-    println!("Sent message to Master Node: {:?}", msg);
+    info!("Sent message to Master Node: {:?}", msg);
     Ok(())
 }
 
@@ -226,23 +231,23 @@ async fn reconnect(
         .await
         {
             Ok(mut s) => {
-                println!("Reconnected to Master Node at {}", addr);
+                info!("Reconnected to Master Node at {}", addr);
 
                 // re-authenticate
                 write_length_prefixed(&mut s, join_info.token.as_bytes()).await?;
                 let auth_resp = read_length_prefixed(&mut s).await?;
                 if auth_resp == b"Invalid token" {
-                    println!("Authentication failed during reconnect");
+                    error!("Authentication failed during reconnect");
                     continue;
                 }
-                println!("Re-authentication successful");
+                info!("Re-authentication successful");
 
                 // request nodes again
                 if let Err(e) = send_message(&mut s, NodeMessage::GetConnectedNodes).await {
-                    println!("Failed to request connected nodes: {}", e);
+                    warn!("Failed to request connected nodes: {}", e);
                 } else if let Ok(buf) = read_length_prefixed(&mut s).await {
                     if let Ok(NodeMessage::ConnectedNodes(nodes)) = serde_json::from_slice(&buf) {
-                        println!("Currently connected nodes in the network: {:?}", nodes);
+                        info!("Currently connected nodes in the network: {:?}", nodes);
                     }
                 }
 
@@ -250,14 +255,14 @@ async fn reconnect(
                 let tasks = open_tasks.lock().unwrap().clone();
                 for task in tasks {
                     if let Err(e) = send_message(&mut s, task.clone()).await {
-                        println!("Failed to resend task: {}", e);
+                        warn!("Failed to resend task: {}", e);
                     }
                 }
 
                 return Ok(s);
             }
             Err(e) => {
-                println!("Failed to connect to {}: {}", addr, e);
+                warn!("Failed to connect to {}: {}", addr, e);
             }
         }
     }

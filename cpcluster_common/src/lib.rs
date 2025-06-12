@@ -33,6 +33,7 @@ pub enum NodeMessage {
     ConnectedNodes(Vec<String>),
     Disconnect,
     Heartbeat,
+    HeartbeatAck,
     AssignTask { id: String, task: Task },
     TaskResult { id: String, result: TaskResult },
     DirectMessage(String),

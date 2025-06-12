@@ -1,6 +1,7 @@
 use cpcluster_common::config::Config;
 use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, Task};
 use cpcluster_common::{read_length_prefixed, write_length_prefixed};
+use log::{error, info, warn};
 use rcgen::generate_simple_self_signed;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -10,7 +11,7 @@ use std::{
     fs,
     sync::{Arc, Mutex},
 };
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio_rustls::{rustls, TlsAcceptor};
 use uuid::Uuid;
@@ -30,11 +31,7 @@ where
 
             if let Some((id, task)) = pending
                 .iter()
-                .find(|(id, _)| {
-                    !nodes
-                        .values()
-                        .any(|n| n.active_tasks.contains_key(*id))
-                })
+                .find(|(id, _)| !nodes.values().any(|n| n.active_tasks.contains_key(*id)))
                 .map(|(id, task)| (id.clone(), task.clone()))
             {
                 pending.remove(&id);
@@ -127,6 +124,7 @@ fn assign_tasks_to_nodes(master: &MasterNode) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    env_logger::init();
     let config = Config::load("config.json").unwrap_or_default();
     config.save("config.json").ok();
 
@@ -146,10 +144,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         port: port.clone(),
     };
     fs::write("join.json", serde_json::to_string_pretty(&join_info)?)?;
-    println!("Join information saved to join.json");
+    info!("Join information saved to join.json");
 
     let listener = TcpListener::bind(format!("{}:{}", ip, port)).await?;
-    println!("Master Node listening on {}:{}", ip, port);
+    info!("Master Node listening on {}:{}", ip, port);
 
     // prepare TLS acceptor using configured or self-signed certificate
     let cert_path = config
@@ -196,15 +194,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             handle_connection(tls_stream, master_node, token, addr.to_string())
                                 .await
                         {
-                            eprintln!("TLS connection error: {:?}", e);
+                            error!("TLS connection error: {:?}", e);
                         }
                     }
-                    Err(e) => eprintln!("TLS accept failed: {:?}", e),
+                    Err(e) => error!("TLS accept failed: {:?}", e),
                 }
             } else if let Err(e) =
                 handle_connection(stream, master_node, token, addr.to_string()).await
             {
-                eprintln!("Connection error: {:?}", e);
+                error!("Connection error: {:?}", e);
             }
         });
     }
@@ -222,7 +220,7 @@ where
     let token_bytes = read_length_prefixed(&mut socket).await?;
     let received_token = String::from_utf8(token_bytes)?.trim().to_string();
     if received_token == token {
-        println!("Client authenticated with correct token");
+        info!("Client authenticated with correct token");
 
         // Inform the client that authentication succeeded so it can
         // continue with the protocol. Without this message the client
@@ -242,14 +240,14 @@ where
         save_state(&master_node);
         // assign any pending tasks to this node immediately
         if let Err(e) = send_pending_tasks(&mut socket, &master_node, &addr).await {
-            eprintln!("Failed to send pending tasks: {}", e);
+            error!("Failed to send pending tasks: {}", e);
         }
 
         loop {
             let data = match read_length_prefixed(&mut socket).await {
                 Ok(d) => d,
                 Err(_) => {
-                    println!("Client disconnected");
+                    warn!("Client disconnected");
                     break;
                 }
             };
@@ -269,7 +267,7 @@ where
                     let response = NodeMessage::ConnectedNodes(connected_nodes);
                     let response_data = serde_json::to_vec(&response)?;
                     write_length_prefixed(&mut socket, &response_data).await?;
-                    println!("Sent connected nodes list to client");
+                    info!("Sent connected nodes list to client");
                 }
                 NodeMessage::RequestConnection(target_id) => {
                     // Prüfe, ob ein freier Port verfügbar ist
@@ -294,17 +292,17 @@ where
                             let response = NodeMessage::ConnectionInfo(target_addr, port);
                             let response_data = serde_json::to_vec(&response)?;
                             write_length_prefixed(&mut socket, &response_data).await?;
-                            println!("Connection info sent to {} on port {}", target_id, port);
+                            info!("Connection info sent to {} on port {}", target_id, port);
                         } else {
-                            println!("Target Node not found");
+                            warn!("Target Node not found");
                         }
                     } else {
-                        println!("No ports available");
+                        warn!("No ports available");
                     }
                 }
                 NodeMessage::Disconnect => {
                     // Entferne die Node und gebe den Port frei
-                    println!("Node disconnected and port released.");
+                    info!("Node disconnected and port released.");
                     release_port(&master_node, addr.clone());
                     master_node.connected_nodes.lock().unwrap().remove(&addr);
                     save_state(&master_node);
@@ -317,6 +315,9 @@ where
                         .unwrap()
                         .entry(addr.clone())
                         .and_modify(|n| n.last_heartbeat = now_ms());
+                    let ack = serde_json::to_vec(&NodeMessage::HeartbeatAck)?;
+                    write_length_prefixed(&mut socket, &ack).await?;
+                    info!("Heartbeat received from {}", addr);
                 }
                 NodeMessage::TaskResult { id, .. } => {
                     master_node
@@ -330,11 +331,11 @@ where
                     master_node.pending_tasks.lock().unwrap().remove(&id);
                     save_state(&master_node);
                 }
-                _ => println!("Unknown request"),
+                _ => warn!("Unknown request"),
             }
             // try to dispatch new tasks that might be pending
             if let Err(e) = send_pending_tasks(&mut socket, &master_node, &addr).await {
-                eprintln!("Failed to send pending tasks: {}", e);
+                error!("Failed to send pending tasks: {}", e);
             }
         }
 
@@ -342,7 +343,7 @@ where
         master_node.connected_nodes.lock().unwrap().remove(&addr);
         save_state(&master_node);
     } else {
-        println!("Client provided an invalid token {}", received_token);
+        warn!("Client provided an invalid token {}", received_token);
         write_length_prefixed(&mut socket, b"Invalid token").await?;
     }
 
@@ -391,7 +392,7 @@ fn cleanup_dead_nodes(master: &MasterNode) {
         }
     }
     for addr in stale {
-        println!("Node {} timed out", addr);
+        warn!("Node {} timed out", addr);
         if let Some(info) = master.connected_nodes.lock().unwrap().remove(&addr) {
             let mut pending = master.pending_tasks.lock().unwrap();
             for (id, task) in info.active_tasks {

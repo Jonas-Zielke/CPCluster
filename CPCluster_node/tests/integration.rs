@@ -3,10 +3,7 @@ use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-};
+use tokio::net::TcpListener;
 
 #[tokio::test]
 async fn node_interacts_with_master() {
