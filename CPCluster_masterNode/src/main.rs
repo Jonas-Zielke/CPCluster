@@ -411,19 +411,29 @@ fn generate_token() -> String {
 }
 
 fn allocate_port(master_node: &MasterNode) -> Option<u16> {
-    let mut ports = master_node.available_ports.lock().unwrap();
-    ports.iter().cloned().next().map(|port| {
-        ports.remove(&port);
+    let port = {
+        let mut ports = master_node.available_ports.lock().unwrap();
+        let port_opt = ports.iter().cloned().next();
+        if let Some(p) = port_opt {
+            ports.remove(&p);
+            Some(p)
+        } else {
+            None
+        }
+    };
+    if port.is_some() {
         save_state(master_node);
-        port
-    })
+    }
+    port
 }
 
 fn release_port(master_node: &MasterNode, addr: String) {
-    if let Some(info) = master_node.connected_nodes.lock().unwrap().get_mut(&addr) {
-        if let Some(port) = info.port.take() {
-            master_node.available_ports.lock().unwrap().insert(port);
-        }
+    let port = {
+        let mut nodes = master_node.connected_nodes.lock().unwrap();
+        nodes.get_mut(&addr).and_then(|info| info.port.take())
+    };
+    if let Some(p) = port {
+        master_node.available_ports.lock().unwrap().insert(p);
     }
     save_state(master_node);
 }
