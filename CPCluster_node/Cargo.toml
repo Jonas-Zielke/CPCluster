@@ -22,4 +22,6 @@ serde_json = "1.0"
 
 # UUID für eindeutige Aufgaben-IDs
 uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.11", features = ["rustls-tls"] }
+meval = "0.2"
 cpcluster_common = { path = "../cpcluster_common" }

@@ -21,6 +21,10 @@ Key components:
 
 The master stores connected nodes together with the timestamp of their last heartbeat. A background task periodically cleans up nodes that stop sending heartbeats. Available ports are tracked in a `HashSet`, both collections protected by `Mutex`.
 
+`generateTlsConfig()` in the master builds a self signed certificate used when clients connect from outside a local network. Nodes rely on `isLocalIp()` from `cpcluster_common` to decide whether TLS should be enabled.
+
+Nodes periodically send heartbeats. If one fails, the failover timeout defined in `config.json` determines when the master removes it. Nodes try each configured master address when reconnecting so another master can take over.
+
 ## Node overview
 
 `CPCluster_node/src/main.rs` shows how a node authenticates with the master and requests the list of connected nodes. After connecting it periodically sends heartbeat messages until the connection is closed.

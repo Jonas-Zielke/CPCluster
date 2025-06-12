@@ -91,6 +91,8 @@ CPCluster is a distributed network of nodes that communicate with each other for
    - Node A requests to connect to Node B.
    - The master node assigns an available port, notifies both Node A and Node B of the connection details.
    - Node A and Node B then establish a direct connection on the assigned port.
+   - Once connected they can exchange tasks. For example Node A can send `AssignTask` with `Compute { expression: "1+2" }` and Node B replies with `TaskResult::Number(3.0)`.
+   - Another example is `HttpRequest { url: "https://example.com" }` which lets a node fetch the page body and return it as `TaskResult::Response`.
 4. **Handling Disconnection**:
    - If a node disconnects, the master releases the assigned port for future connections and notifies the other node if necessary.
 

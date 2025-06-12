@@ -1,5 +1,8 @@
-use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage};
 use cpcluster_common::config::Config;
+use cpcluster_common::{isLocalIp, JoinInfo, NodeMessage, Task};
+use rcgen::generate_simple_self_signed;
+use serde::{Deserialize, Serialize};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -9,16 +12,14 @@ use std::{
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{rustls, TlsAcceptor};
-use rcgen::generate_simple_self_signed;
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct NodeInfo {
     addr: String,
     last_heartbeat: u64,
+    port: Option<u16>,
+    active_tasks: HashMap<String, Task>,
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +27,7 @@ struct MasterNode {
     connectedNodes: Arc<Mutex<HashMap<String, NodeInfo>>>, // speichert Node-ID und Infos
     availablePorts: Arc<Mutex<HashSet<u16>>>,              // verwaltet verfügbare Ports
     failover_timeout_ms: u64,
+    pending_tasks: Arc<Mutex<HashMap<String, Task>>>,
 }
 
 #[tokio::main]
@@ -62,6 +64,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         connectedNodes: Arc::new(Mutex::new(HashMap::new())),
         availablePorts: Arc::new(Mutex::new((config.min_port..=config.max_port).collect())),
         failover_timeout_ms: config.failover_timeout_ms,
+        pending_tasks: Arc::new(Mutex::new(HashMap::new())),
     });
     loadState(&masterNode);
 
@@ -86,13 +89,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             if useTls {
                 match acceptor.accept(stream).await {
                     Ok(tlsStream) => {
-                        if let Err(e) = handleConnection(tlsStream, masterNode, token, addr.to_string()).await {
+                        if let Err(e) =
+                            handleConnection(tlsStream, masterNode, token, addr.to_string()).await
+                        {
                             eprintln!("TLS connection error: {:?}", e);
                         }
                     }
                     Err(e) => eprintln!("TLS accept failed: {:?}", e),
                 }
-            } else if let Err(e) = handleConnection(stream, masterNode, token, addr.to_string()).await {
+            } else if let Err(e) =
+                handleConnection(stream, masterNode, token, addr.to_string()).await
+            {
                 eprintln!("Connection error: {:?}", e);
             }
         });
@@ -121,17 +128,15 @@ where
         socket.write_all(b"OK").await?;
 
         // Füge die Node zur verbundenen Liste hinzu
-        masterNode
-            .connectedNodes
-            .lock()
-            .unwrap()
-            .insert(
-                addr.clone(),
-                NodeInfo {
-                    addr: addr.clone(),
-                    last_heartbeat: now_ms(),
-                },
-            );
+        masterNode.connectedNodes.lock().unwrap().insert(
+            addr.clone(),
+            NodeInfo {
+                addr: addr.clone(),
+                last_heartbeat: now_ms(),
+                port: None,
+                active_tasks: HashMap::new(),
+            },
+        );
         saveState(&masterNode);
 
         loop {
@@ -162,6 +167,12 @@ where
                 NodeMessage::RequestConnection(target_id) => {
                     // Prüfe, ob ein freier Port verfügbar ist
                     if let Some(port) = allocatePort(&masterNode) {
+                        masterNode
+                            .connectedNodes
+                            .lock()
+                            .unwrap()
+                            .entry(addr.clone())
+                            .and_modify(|n| n.port = Some(port));
                         // Hole die Adresse der Ziel-Node
                         let target_addr = masterNode
                             .connectedNodes
@@ -200,6 +211,17 @@ where
                         .entry(addr.clone())
                         .and_modify(|n| n.last_heartbeat = now_ms());
                 }
+                NodeMessage::TaskResult { id, .. } => {
+                    masterNode
+                        .connectedNodes
+                        .lock()
+                        .unwrap()
+                        .entry(addr.clone())
+                        .and_modify(|n| {
+                            n.active_tasks.remove(&id);
+                        });
+                    masterNode.pending_tasks.lock().unwrap().remove(&id);
+                }
                 _ => println!("Unknown request"),
             }
         }
@@ -229,11 +251,12 @@ fn allocatePort(masterNode: &MasterNode) -> Option<u16> {
 }
 
 fn releasePort(masterNode: &MasterNode, addr: String) {
-    let mut ports = masterNode.availablePorts.lock().unwrap();
-    if let Some(port) = addr.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()) {
-        ports.insert(port);
-        saveState(masterNode);
+    if let Some(mut info) = masterNode.connectedNodes.lock().unwrap().get_mut(&addr) {
+        if let Some(port) = info.port.take() {
+            masterNode.availablePorts.lock().unwrap().insert(port);
+        }
     }
+    saveState(masterNode);
 }
 
 fn now_ms() -> u64 {
@@ -257,7 +280,12 @@ fn cleanupDeadNodes(master: &MasterNode) {
     }
     for addr in stale {
         println!("Node {} timed out", addr);
-        master.connectedNodes.lock().unwrap().remove(&addr);
+        if let Some(info) = master.connectedNodes.lock().unwrap().remove(&addr) {
+            let mut pending = master.pending_tasks.lock().unwrap();
+            for (id, task) in info.active_tasks {
+                pending.insert(id, task);
+            }
+        }
         releasePort(master, addr);
     }
     saveState(master);
@@ -270,7 +298,10 @@ fn generateTlsConfig() -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sy
     let config = rustls::ServerConfig::builder()
         .with_safe_defaults()
         .with_no_client_auth()
-        .with_single_cert(vec![rustls::Certificate(cert_der)], rustls::PrivateKey(key_der))?;
+        .with_single_cert(
+            vec![rustls::Certificate(cert_der)],
+            rustls::PrivateKey(key_der),
+        )?;
     Ok(config)
 }
 
@@ -278,6 +309,7 @@ fn generateTlsConfig() -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sy
 struct MasterState {
     connected_nodes: HashMap<String, NodeInfo>,
     available_ports: Vec<u16>,
+    pending_tasks: HashMap<String, Task>,
 }
 
 fn loadState(master: &MasterNode) {
@@ -285,6 +317,7 @@ fn loadState(master: &MasterNode) {
         if let Ok(state) = serde_json::from_str::<MasterState>(&data) {
             *master.connectedNodes.lock().unwrap() = state.connected_nodes;
             *master.availablePorts.lock().unwrap() = state.available_ports.into_iter().collect();
+            *master.pending_tasks.lock().unwrap() = state.pending_tasks;
         }
     }
 }
@@ -292,7 +325,14 @@ fn loadState(master: &MasterNode) {
 fn saveState(master: &MasterNode) {
     let state = MasterState {
         connected_nodes: master.connectedNodes.lock().unwrap().clone(),
-        available_ports: master.availablePorts.lock().unwrap().iter().cloned().collect(),
+        available_ports: master
+            .availablePorts
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect(),
+        pending_tasks: master.pending_tasks.lock().unwrap().clone(),
     };
     if let Ok(data) = serde_json::to_string_pretty(&state) {
         let _ = fs::write("master_state.json", data);
