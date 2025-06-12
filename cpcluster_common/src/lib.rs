@@ -10,7 +10,7 @@ pub struct JoinInfo {
     pub port: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum NodeMessage {
     RequestConnection(String),
     ConnectionInfo(String, u16),

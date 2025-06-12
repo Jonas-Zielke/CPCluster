@@ -34,6 +34,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = Config::load("config.json").unwrap_or_default();
 
     let mut stream: Option<Box<dyn ReadWrite + Unpin + Send>> = None;
+    let mut open_tasks: Vec<NodeMessage> = Vec::new();
     let mut self_addr: Option<String> = None;
     for addr in &config.master_addresses {
         match connect(addr, isLocalIp(&joinInfo.ip), &joinInfo.ip).await {
@@ -105,7 +106,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     loop {
         if let Err(e) = sendMessage(&mut stream, NodeMessage::Heartbeat).await {
             println!("Heartbeat failed: {}", e);
-            break;
+            match reconnect(&joinInfo, &config, &open_tasks).await {
+                Ok(s) => {
+                    stream = s;
+                    continue;
+                }
+                Err(err) => {
+                    println!("Reconnect failed: {}", err);
+                    break;
+                }
+            }
         }
         tokio::time::sleep(std::time::Duration::from_millis(config.failover_timeout_ms)).await;
     }
@@ -218,4 +228,59 @@ async fn handle_direct_connection(addr: String, port: u16) -> Result<(), Box<dyn
         }
     }
     Ok(())
+}
+
+async fn reconnect(
+    join_info: &JoinInfo,
+    config: &Config,
+    open_tasks: &[NodeMessage],
+) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
+    for addr in &config.master_addresses {
+        match connect(addr, isLocalIp(&join_info.ip), &join_info.ip).await {
+            Ok((mut s, _)) => {
+                println!("Reconnected to Master Node at {}", addr);
+
+                // re-authenticate
+                s.write_all(join_info.token.as_bytes()).await?;
+                let mut auth_resp = vec![0; 1024];
+                let n = s.read(&mut auth_resp).await?;
+                if n == 0 || &auth_resp[..n] == b"Invalid token" {
+                    println!("Authentication failed during reconnect");
+                    continue;
+                }
+                println!("Re-authentication successful");
+
+                // request nodes again
+                if let Err(e) = sendMessage(&mut s, NodeMessage::GetConnectedNodes).await {
+                    println!("Failed to request connected nodes: {}", e);
+                } else {
+                    let mut buf = vec![0; 1024];
+                    if let Ok(n) = s.read(&mut buf).await {
+                        if n > 0 {
+                            if let Ok(NodeMessage::ConnectedNodes(nodes)) = serde_json::from_slice(&buf[..n]) {
+                                println!("Currently connected nodes in the network: {:?}", nodes);
+                            }
+                        }
+                    }
+                }
+
+                // resend open tasks
+                for task in open_tasks {
+                    if let Err(e) = sendMessage(&mut s, task.clone()).await {
+                        println!("Failed to resend task: {}", e);
+                    }
+                }
+
+                return Ok(s);
+            }
+            Err(e) => {
+                println!("Failed to connect to {}: {}", addr, e);
+            }
+        }
+    }
+
+    Err(Box::new(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        "Unable to reconnect to any master node",
+    )))
 }
