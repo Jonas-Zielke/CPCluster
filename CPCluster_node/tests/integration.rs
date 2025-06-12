@@ -1,4 +1,4 @@
-use cpcluster_common::NodeMessage;
+use cpcluster_common::{read_length_prefixed, write_length_prefixed, NodeMessage};
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
@@ -21,20 +21,18 @@ async fn node_interacts_with_master() {
     // spawn simplified master server
     let server = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
-        let mut buf = [0u8; 1024];
-        let n = socket.read(&mut buf).await.unwrap();
-        assert_eq!(std::str::from_utf8(&buf[..n]).unwrap(), token_srv);
-        socket.write_all(b"OK").await.unwrap();
-        let n = socket.read(&mut buf).await.unwrap();
-        let msg: NodeMessage = serde_json::from_slice(&buf[..n]).unwrap();
+        let token_bytes = read_length_prefixed(&mut socket).await.unwrap();
+        assert_eq!(std::str::from_utf8(&token_bytes).unwrap(), token_srv);
+        write_length_prefixed(&mut socket, b"OK").await.unwrap();
+        let msg = read_length_prefixed(&mut socket).await.unwrap();
+        let msg: NodeMessage = serde_json::from_slice(&msg).unwrap();
         assert!(matches!(msg, NodeMessage::GetConnectedNodes));
         let resp = NodeMessage::ConnectedNodes(vec!["node1".into()]);
-        socket
-            .write_all(&serde_json::to_vec(&resp).unwrap())
+        write_length_prefixed(&mut socket, &serde_json::to_vec(&resp).unwrap())
             .await
             .unwrap();
-        let n = socket.read(&mut buf).await.unwrap();
-        let msg: NodeMessage = serde_json::from_slice(&buf[..n]).unwrap();
+        let msg = read_length_prefixed(&mut socket).await.unwrap();
+        let msg: NodeMessage = serde_json::from_slice(&msg).unwrap();
         if let NodeMessage::RequestConnection(id) = msg {
             let port = {
                 let mut set = ports_srv.lock().unwrap();
@@ -43,8 +41,7 @@ async fn node_interacts_with_master() {
                 p
             };
             let resp = NodeMessage::ConnectionInfo(id, port);
-            socket
-                .write_all(&serde_json::to_vec(&resp).unwrap())
+            write_length_prefixed(&mut socket, &serde_json::to_vec(&resp).unwrap())
                 .await
                 .unwrap();
         }
@@ -52,23 +49,28 @@ async fn node_interacts_with_master() {
 
     // spawn client node
     let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
-    stream.write_all(token.as_bytes()).await.unwrap();
-    let mut buf = [0u8; 1024];
-    let n = stream.read(&mut buf).await.unwrap();
-    assert_eq!(&buf[..n], b"OK");
-    stream
-        .write_all(&serde_json::to_vec(&NodeMessage::GetConnectedNodes).unwrap())
+    write_length_prefixed(&mut stream, token.as_bytes())
         .await
         .unwrap();
-    let n = stream.read(&mut buf).await.unwrap();
-    let msg: NodeMessage = serde_json::from_slice(&buf[..n]).unwrap();
+    let resp = read_length_prefixed(&mut stream).await.unwrap();
+    assert_eq!(&resp[..], b"OK");
+    write_length_prefixed(
+        &mut stream,
+        &serde_json::to_vec(&NodeMessage::GetConnectedNodes).unwrap(),
+    )
+    .await
+    .unwrap();
+    let msg = read_length_prefixed(&mut stream).await.unwrap();
+    let msg: NodeMessage = serde_json::from_slice(&msg).unwrap();
     assert!(matches!(msg, NodeMessage::ConnectedNodes(_)));
-    stream
-        .write_all(&serde_json::to_vec(&NodeMessage::RequestConnection("node1".into())).unwrap())
-        .await
-        .unwrap();
-    let n = stream.read(&mut buf).await.unwrap();
-    let msg: NodeMessage = serde_json::from_slice(&buf[..n]).unwrap();
+    write_length_prefixed(
+        &mut stream,
+        &serde_json::to_vec(&NodeMessage::RequestConnection("node1".into())).unwrap(),
+    )
+    .await
+    .unwrap();
+    let msg = read_length_prefixed(&mut stream).await.unwrap();
+    let msg: NodeMessage = serde_json::from_slice(&msg).unwrap();
     match msg {
         NodeMessage::ConnectionInfo(_, port) => assert_eq!(port, addr.port() + 1),
         other => panic!("unexpected message: {:?}", other),

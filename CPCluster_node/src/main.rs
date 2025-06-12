@@ -1,7 +1,11 @@
 use cpcluster_common::config::Config;
-use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, Task, TaskResult};
+use cpcluster_common::{
+    is_local_ip, read_length_prefixed, write_length_prefixed, JoinInfo, NodeMessage, Task,
+    TaskResult,
+};
 use meval::eval_str;
 use reqwest::Client;
+use rustls_native_certs as native_certs;
 use std::{
     error::Error,
     fs,
@@ -12,7 +16,6 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 use tokio_rustls::{rustls, TlsConnector};
-use rustls_native_certs as native_certs;
 
 trait ReadWrite: AsyncRead + AsyncWrite {}
 impl<T: AsyncRead + AsyncWrite + ?Sized> ReadWrite for T {}
@@ -55,13 +58,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     };
 
     // Send only the token for authentication
-    stream.write_all(join_info.token.as_bytes()).await?;
+    write_length_prefixed(&mut stream, join_info.token.as_bytes()).await?;
     println!("Token sent for authentication");
 
     // Read and verify authentication response from the master node
-    let mut auth_response = vec![0; 1024];
-    let n = stream.read(&mut auth_response).await?;
-    if n == 0 || &auth_response[..n] == b"Invalid token" {
+    let auth_response = read_length_prefixed(&mut stream).await?;
+    if auth_response == b"Invalid token" {
         println!("Authentication failed");
         return Ok(());
     }
@@ -72,14 +74,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     send_message(&mut stream, get_nodes_request).await?;
 
     // Receive and display the list of connected nodes
-    let mut buf = vec![0; 1024];
-    let n = stream.read(&mut buf).await?;
-    if n == 0 {
-        println!("Connection closed by Master Node");
-        return Ok(());
-    }
+    let buf = read_length_prefixed(&mut stream).await?;
 
-    let response: NodeMessage = serde_json::from_slice(&buf[..n])?;
+    let response: NodeMessage = serde_json::from_slice(&buf)?;
     if let NodeMessage::ConnectedNodes(nodes) = response {
         println!("Currently connected nodes in the network: {:?}", nodes);
         if let Some(peer) = nodes.first() {
@@ -103,21 +100,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             }
         }
 
-        let mut buf = vec![0; 1024];
-        if let Ok(Ok(n)) =
-            tokio::time::timeout(std::time::Duration::from_millis(100), stream.read(&mut buf)).await
+        if let Ok(Ok(buf)) = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            read_length_prefixed(&mut stream),
+        )
+        .await
         {
-            if n == 0 {
-                println!("Master closed the connection");
-                break;
-            }
-            if let Ok(msg) = serde_json::from_slice::<NodeMessage>(&buf[..n]) {
+            if let Ok(msg) = serde_json::from_slice::<NodeMessage>(&buf) {
                 match msg {
                     NodeMessage::ConnectionInfo(target, port) => {
                         let tasks = open_tasks.clone();
                         let ca = config.ca_cert_path.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = handle_connection(target, port, tasks, ca.as_deref()).await {
+                            if let Err(e) =
+                                handle_connection(target, port, tasks, ca.as_deref()).await
+                            {
                                 eprintln!("Direct connection error: {}", e);
                             }
                         });
@@ -145,7 +142,7 @@ where
     S: AsyncWrite + Unpin,
 {
     let msg_data = serde_json::to_vec(&msg)?;
-    stream.write_all(&msg_data).await?;
+    write_length_prefixed(stream, &msg_data).await?;
     println!("Sent message to Master Node: {:?}", msg);
     Ok(())
 }
@@ -169,29 +166,31 @@ async fn connect(
     }
 }
 
-fn build_tls_config(ca_path: Option<&str>) -> Result<rustls::ClientConfig, Box<dyn Error + Send + Sync>> {
+fn build_tls_config(
+    ca_path: Option<&str>,
+) -> Result<rustls::ClientConfig, Box<dyn Error + Send + Sync>> {
     let mut root_store = rustls::RootCertStore::empty();
     if let Some(path) = ca_path {
         let mut pem = std::io::BufReader::new(fs::File::open(path)?);
         for cert in rustls_pemfile::certs(&mut pem)? {
-            root_store
-                .add(&rustls::Certificate(cert))
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{:?}", e)))?;
+            root_store.add(&rustls::Certificate(cert)).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{:?}", e))
+            })?;
         }
     } else {
         let native = native_certs::load_native_certs().expect("could not load platform certs");
         for cert in native {
             root_store
                 .add(&rustls::Certificate(cert.as_ref().to_vec()))
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{:?}", e)))?;
+                .map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{:?}", e))
+                })?;
         }
     }
-    Ok(
-        rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_root_certificates(root_store)
-            .with_no_client_auth(),
-    )
+    Ok(rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_store)
+        .with_no_client_auth())
 }
 
 async fn reconnect(
@@ -212,10 +211,9 @@ async fn reconnect(
                 println!("Reconnected to Master Node at {}", addr);
 
                 // re-authenticate
-                s.write_all(join_info.token.as_bytes()).await?;
-                let mut auth_resp = vec![0; 1024];
-                let n = s.read(&mut auth_resp).await?;
-                if n == 0 || &auth_resp[..n] == b"Invalid token" {
+                write_length_prefixed(&mut s, join_info.token.as_bytes()).await?;
+                let auth_resp = read_length_prefixed(&mut s).await?;
+                if auth_resp == b"Invalid token" {
                     println!("Authentication failed during reconnect");
                     continue;
                 }
@@ -224,16 +222,9 @@ async fn reconnect(
                 // request nodes again
                 if let Err(e) = send_message(&mut s, NodeMessage::GetConnectedNodes).await {
                     println!("Failed to request connected nodes: {}", e);
-                } else {
-                    let mut buf = vec![0; 1024];
-                    if let Ok(n) = s.read(&mut buf).await {
-                        if n > 0 {
-                            if let Ok(NodeMessage::ConnectedNodes(nodes)) =
-                                serde_json::from_slice(&buf[..n])
-                            {
-                                println!("Currently connected nodes in the network: {:?}", nodes);
-                            }
-                        }
+                } else if let Ok(buf) = read_length_prefixed(&mut s).await {
+                    if let Ok(NodeMessage::ConnectedNodes(nodes)) = serde_json::from_slice(&buf) {
+                        println!("Currently connected nodes in the network: {:?}", nodes);
                     }
                 }
 
@@ -298,12 +289,11 @@ async fn handle_connection(
 
     let client = Client::new();
     loop {
-        let mut buf = [0u8; 1024];
-        let n = stream.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        if let Ok(NodeMessage::AssignTask { id, task }) = serde_json::from_slice(&buf[..n]) {
+        let buf = match read_length_prefixed(&mut stream).await {
+            Ok(b) => b,
+            Err(_) => break,
+        };
+        if let Ok(NodeMessage::AssignTask { id, task }) = serde_json::from_slice(&buf) {
             let result = match task {
                 Task::Compute { expression } => match eval_str(&expression) {
                     Ok(v) => TaskResult::Number(v),
