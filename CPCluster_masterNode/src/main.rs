@@ -11,7 +11,7 @@ use std::{
     fs,
     sync::{Arc, Mutex},
 };
-use tokio::io::{stdin, AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio_rustls::{rustls, TlsAcceptor};
 use uuid::Uuid;
@@ -122,12 +122,14 @@ fn assign_tasks_to_nodes(master: &MasterNode) {
     }
 }
 
-async fn run_shell(master: Arc<MasterNode>) {
-    let mut lines = BufReader::new(stdin()).lines();
+fn run_shell(master: Arc<MasterNode>) {
+    use std::io::{self, BufRead};
+    let stdin = io::stdin();
+    let mut lines = stdin.lock().lines();
     println!(
         "CPCluster shell ready.\nCommands:\n  nodes  - list connected nodes\n  tasks  - list active and pending tasks\n  exit   - quit"
     );
-    while let Ok(Some(line)) = lines.next_line().await {
+    while let Some(Ok(line)) = lines.next() {
         match line.trim() {
             "nodes" => {
                 let nodes = master.connected_nodes.lock().unwrap();
@@ -219,8 +221,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     load_state(&master_node);
 
     let shell_master = Arc::clone(&master_node);
-    tokio::spawn(async move {
-        run_shell(shell_master).await;
+    std::thread::spawn(move || {
+        run_shell(shell_master);
     });
 
     // Cleanup task to remove nodes that stopped sending heartbeats
