@@ -64,7 +64,7 @@ CPCluster is a distributed network of nodes that communicate with each other for
 
 1. **Generate join.json**: When the master node is started, it creates a `join.json` file with a unique token for network access.
 2. **Copy `join.json` to nodes**: Each node must have a `join.json` file identical to the one in the master node directory. Copy this file to the `CPCluster_node` directory for each node that will join the network.
-3. **Edit `config.json`**: Both master and nodes read runtime options from `config.json`. You can configure the port range, failover timeout, a list of master node addresses and optional paths to TLS certificates. Set `ca_cert_path` on nodes to verify the master's certificate and `cert_path`/`key_path` on the master to use a specific certificate and private key.
+3. **Edit `config.json`**: Both master and nodes read runtime options from `config.json`. You can configure the port range, failover timeout, a list of master node addresses and optional paths to TLS certificates. Nodes may specify `ca_cert` or `ca_cert_path` to verify the master's certificate and the master can use `cert_path`/`key_path` for its own certificate and private key.
 
 ### Running the Project
 

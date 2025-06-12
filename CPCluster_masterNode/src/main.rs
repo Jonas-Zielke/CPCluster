@@ -134,7 +134,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .key_path
         .clone()
         .unwrap_or_else(|| "master_key.pem".to_string());
-    let tls_config = load_or_generate_tls_config(&cert_path, &key_path)?;
+    let tls_config = load_or_generate_tls_config(&cert_path, &key_path, &ip)?;
     let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
     let master_node = Arc::new(MasterNode {
@@ -379,6 +379,7 @@ fn cleanup_dead_nodes(master: &MasterNode) {
 fn load_or_generate_tls_config(
     cert_path: &str,
     key_path: &str,
+    host: &str,
 ) -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sync>> {
     if std::path::Path::new(cert_path).exists() && std::path::Path::new(key_path).exists() {
         let mut cert_file = std::io::BufReader::new(fs::File::open(cert_path)?);
@@ -395,7 +396,7 @@ fn load_or_generate_tls_config(
             .with_single_cert(certs, rustls::PrivateKey(key))?;
         Ok(config)
     } else {
-        let cert = generate_simple_self_signed(vec!["localhost".to_string()])?;
+        let cert = generate_simple_self_signed(vec![host.to_string()])?;
         fs::write(cert_path, cert.serialize_pem()?)?;
         fs::write(key_path, cert.serialize_private_key_pem())?;
         let cert_der = cert.serialize_der()?;

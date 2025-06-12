@@ -4,6 +4,7 @@
   "failover_timeout_ms": 5000,
   "master_addresses": ["127.0.0.1:55000"],
   "ca_cert_path": null,
+  "ca_cert": null,
   "cert_path": null,
   "key_path": null
 }
