@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio_rustls::{rustls, TlsAcceptor};
 use uuid::Uuid;
 
@@ -56,8 +56,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let listener = TcpListener::bind(format!("{}:{}", ip, port)).await?;
     println!("Master Node listening on {}:{}", ip, port);
 
-    // prepare TLS acceptor using a self-signed certificate
-    let tls_config = generate_tls_config()?;
+    // prepare TLS acceptor using configured or self-signed certificate
+    let cert_path = config
+        .cert_path
+        .clone()
+        .unwrap_or_else(|| "master_cert.pem".to_string());
+    let key_path = config
+        .key_path
+        .clone()
+        .unwrap_or_else(|| "master_key.pem".to_string());
+    let tls_config = load_or_generate_tls_config(&cert_path, &key_path)?;
     let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
     let master_node = Arc::new(MasterNode {
@@ -251,7 +259,7 @@ fn allocate_port(master_node: &MasterNode) -> Option<u16> {
 }
 
 fn release_port(master_node: &MasterNode, addr: String) {
-    if let Some(mut info) = master_node.connected_nodes.lock().unwrap().get_mut(&addr) {
+    if let Some(info) = master_node.connected_nodes.lock().unwrap().get_mut(&addr) {
         if let Some(port) = info.port.take() {
             master_node.available_ports.lock().unwrap().insert(port);
         }
@@ -291,18 +299,39 @@ fn cleanup_dead_nodes(master: &MasterNode) {
     save_state(master);
 }
 
-fn generate_tls_config() -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sync>> {
-    let cert = generate_simple_self_signed(vec!["localhost".to_string()])?;
-    let cert_der = cert.serialize_der()?;
-    let key_der = cert.serialize_private_key_der();
-    let config = rustls::ServerConfig::builder()
-        .with_safe_defaults()
-        .with_no_client_auth()
-        .with_single_cert(
-            vec![rustls::Certificate(cert_der)],
-            rustls::PrivateKey(key_der),
-        )?;
-    Ok(config)
+fn load_or_generate_tls_config(
+    cert_path: &str,
+    key_path: &str,
+) -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sync>> {
+    if std::path::Path::new(cert_path).exists() && std::path::Path::new(key_path).exists() {
+        let mut cert_file = std::io::BufReader::new(fs::File::open(cert_path)?);
+        let mut key_file = std::io::BufReader::new(fs::File::open(key_path)?);
+        let certs = rustls_pemfile::certs(&mut cert_file)?
+            .into_iter()
+            .map(rustls::Certificate)
+            .collect();
+        let keys = rustls_pemfile::pkcs8_private_keys(&mut key_file)?;
+        let key = keys.first().ok_or("no private key found")?.clone();
+        let config = rustls::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(certs, rustls::PrivateKey(key))?;
+        Ok(config)
+    } else {
+        let cert = generate_simple_self_signed(vec!["localhost".to_string()])?;
+        fs::write(cert_path, cert.serialize_pem()?)?;
+        fs::write(key_path, cert.serialize_private_key_pem())?;
+        let cert_der = cert.serialize_der()?;
+        let key_der = cert.serialize_private_key_der();
+        let config = rustls::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![rustls::Certificate(cert_der)],
+                rustls::PrivateKey(key_der),
+            )?;
+        Ok(config)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
