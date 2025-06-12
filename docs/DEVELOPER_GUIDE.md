@@ -21,7 +21,7 @@ Key components:
 
 The master stores connected nodes together with the timestamp of their last heartbeat. A background task periodically cleans up nodes that stop sending heartbeats. Available ports are tracked in a `HashSet`, both collections protected by `Mutex`.
 
-`generate_tls_config()` in the master builds a self-signed certificate used when clients connect from outside a local network. Nodes rely on `is_local_ip()` from `cpcluster_common` to decide whether TLS should be enabled.
+`generate_tls_config()` in the master builds a self-signed certificate used when clients connect from outside a local network. Nodes rely on `is_local_ip()` from `cpcluster_common` to decide whether TLS should be enabled. Alternatively you can supply your own certificate using `cert_path` and `key_path` in `config.json` and distribute the public certificate to nodes via `ca_cert_path`.
 
 Nodes periodically send heartbeats. If one fails, the failover timeout defined in `config.json` determines when the master removes it. Nodes try each configured master address when reconnecting so another master can take over.
 
@@ -33,7 +33,7 @@ Nodes periodically send heartbeats. If one fails, the failover timeout defined i
 
 ## Contribution hints
 
-1. Make sure [Rust](https://www.rust-lang.org/) is installed. Use the provided `scripts/install.sh` for a quick setup.
+1. Make sure [Rust](https://www.rust-lang.org/) is installed. You can run `./setup_container.sh` from the repository root to install all dependencies and build the project.
 2. Build each crate individually using `cargo build` inside `CPCluster_masterNode` and `CPCluster_node`.
 3. Run nodes separately in different terminals with `cargo run`.
 4. Runtime options such as port ranges or master addresses are loaded from `config.json` via the `Config` helper in `cpcluster_common`.

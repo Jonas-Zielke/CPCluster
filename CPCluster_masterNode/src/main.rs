@@ -24,11 +24,11 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     loop {
-        let task = {
-            let pending = master.pending_tasks.lock().unwrap();
+        let next_task = {
+            let mut pending = master.pending_tasks.lock().unwrap();
             let nodes = master.connected_nodes.lock().unwrap();
 
-            pending
+            if let Some((id, task)) = pending
                 .iter()
                 .find(|(id, _)| {
                     !nodes
@@ -36,26 +36,48 @@ where
                         .any(|n| n.active_tasks.contains_key(*id))
                 })
                 .map(|(id, task)| (id.clone(), task.clone()))
+            {
+                pending.remove(&id);
+                Some((id, task))
+            } else {
+                None
+            }
         };
 
-        if let Some((id, task)) = task {
+        let (id, task) = match next_task {
+            Some(t) => t,
+            None => break,
+        };
+
+        master
+            .connected_nodes
+            .lock()
+            .unwrap()
+            .entry(addr.to_string())
+            .and_modify(|n| {
+                n.active_tasks.insert(id.clone(), task.clone());
+            });
+
+        let msg = NodeMessage::AssignTask {
+            id: id.clone(),
+            task: task.clone(),
+        };
+        let data = serde_json::to_vec(&msg)?;
+        if let Err(e) = write_length_prefixed(socket, &data).await {
+            master
+                .pending_tasks
+                .lock()
+                .unwrap()
+                .insert(id.clone(), task.clone());
             master
                 .connected_nodes
                 .lock()
                 .unwrap()
                 .entry(addr.to_string())
                 .and_modify(|n| {
-                    n.active_tasks.insert(id.clone(), task.clone());
+                    n.active_tasks.remove(&id);
                 });
-
-            let msg = NodeMessage::AssignTask {
-                id: id.clone(),
-                task,
-            };
-            let data = serde_json::to_vec(&msg)?;
-            write_length_prefixed(socket, &data).await?;
-        } else {
-            break;
+            return Err(e);
         }
     }
     Ok(())

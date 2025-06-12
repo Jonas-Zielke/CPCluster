@@ -34,16 +34,12 @@ CPCluster is a distributed network of nodes that communicate with each other for
    cd CPCluster
    ```
 
-   You can run `scripts/install.sh` from the repository root to install Rust
-   (if missing) and build both projects automatically.
-
-    For a full container setup including system packages you can also run
-    `./setup_container.sh` from the repository root. The script detects a
-    supported package manager (e.g. `apt`, `dnf`, `yum`) to install required
-    packages, installs Rust if necessary and builds both crates.
-    If no known package manager is found you will need to install `curl`, `git`,
-    `build-essential`, `pkg-config` and `libssl-dev` manually before running the
-    script.
+   You can run `./setup_container.sh` from the repository root to install Rust
+   and all required packages automatically. The script detects a supported
+   package manager (e.g. `apt`, `dnf`, `yum`), installs dependencies and builds
+   both crates. If no known package manager is found you will need to install
+   `curl`, `git`, `build-essential`, `pkg-config` and `libssl-dev` manually
+   before running the script.
 
 2. **Navigate to each project**:
    - Master Node:
@@ -65,6 +61,13 @@ CPCluster is a distributed network of nodes that communicate with each other for
 1. **Generate join.json**: When the master node is started, it creates a `join.json` file with a unique token for network access.
 2. **Copy `join.json` to nodes**: Each node must have a `join.json` file identical to the one in the master node directory. Copy this file to the `CPCluster_node` directory for each node that will join the network.
 3. **Edit `config.json`**: Both master and nodes read runtime options from `config.json`. You can configure the port range, failover timeout, a list of master node addresses and optional paths to TLS certificates. Nodes may specify `ca_cert` or `ca_cert_path` to verify the master's certificate and the master can use `cert_path`/`key_path` for its own certificate and private key.
+4. **Generate TLS certificates (optional)**: To secure traffic between nodes and the master, create a certificate for the master node and distribute it to all nodes:
+   ```bash
+   openssl req -x509 -newkey rsa:4096 -nodes -keyout master_key.pem \
+       -out master_cert.pem -days 365 -subj "/CN=<master-ip>"
+   ```
+   Set `cert_path` and `key_path` in `config.json` to these files and copy
+   `master_cert.pem` to each node, configuring the path in `ca_cert_path`.
 
 ### Running the Project
 
