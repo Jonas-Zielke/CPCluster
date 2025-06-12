@@ -12,25 +12,10 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 use tokio_rustls::{rustls, TlsConnector};
-
-struct NoCertificateVerification;
+use rustls_native_certs as native_certs;
 
 trait ReadWrite: AsyncRead + AsyncWrite {}
 impl<T: AsyncRead + AsyncWrite + ?Sized> ReadWrite for T {}
-
-impl rustls::client::ServerCertVerifier for NoCertificateVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::Certificate,
-        _intermediates: &[rustls::Certificate],
-        _server_name: &rustls::ServerName,
-        _scts: &mut dyn Iterator<Item = &[u8]>,
-        _ocsp: &[u8],
-        _now: std::time::SystemTime,
-    ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::ServerCertVerified::assertion())
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -42,7 +27,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut stream: Option<Box<dyn ReadWrite + Unpin + Send>> = None;
     let open_tasks: Arc<Mutex<Vec<NodeMessage>>> = Arc::new(Mutex::new(Vec::new()));
     for addr in &config.master_addresses {
-        match connect(addr, is_local_ip(&join_info.ip), &join_info.ip).await {
+        match connect(
+            addr,
+            is_local_ip(&join_info.ip),
+            &join_info.ip,
+            config.ca_cert_path.as_deref(),
+        )
+        .await
+        {
             Ok(s) => {
                 println!("Connected to Master Node at {}", addr);
                 stream = Some(s);
@@ -123,8 +115,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 match msg {
                     NodeMessage::ConnectionInfo(target, port) => {
                         let tasks = open_tasks.clone();
+                        let ca = config.ca_cert_path.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = handle_connection(target, port, tasks).await {
+                            if let Err(e) = handle_connection(target, port, tasks, ca.as_deref()).await {
                                 eprintln!("Direct connection error: {}", e);
                             }
                         });
@@ -161,21 +154,44 @@ async fn connect(
     addr: &str,
     local: bool,
     ip: &str,
+    ca_path: Option<&str>,
 ) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
     if local {
         let tcp = TcpStream::connect(addr).await?;
         Ok(Box::new(tcp))
     } else {
         let tcp = TcpStream::connect(addr).await?;
-        let config = rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
-            .with_no_client_auth();
+        let config = build_tls_config(ca_path)?;
         let connector = TlsConnector::from(Arc::new(config));
         let server_name = rustls::ServerName::try_from(ip)?;
         let tls = connector.connect(server_name, tcp).await?;
         Ok(Box::new(tls))
     }
+}
+
+fn build_tls_config(ca_path: Option<&str>) -> Result<rustls::ClientConfig, Box<dyn Error + Send + Sync>> {
+    let mut root_store = rustls::RootCertStore::empty();
+    if let Some(path) = ca_path {
+        let mut pem = std::io::BufReader::new(fs::File::open(path)?);
+        for cert in rustls_pemfile::certs(&mut pem)? {
+            root_store
+                .add(&rustls::Certificate(cert))
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{:?}", e)))?;
+        }
+    } else {
+        let native = native_certs::load_native_certs().expect("could not load platform certs");
+        for cert in native {
+            root_store
+                .add(&rustls::Certificate(cert.as_ref().to_vec()))
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{:?}", e)))?;
+        }
+    }
+    Ok(
+        rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_root_certificates(root_store)
+            .with_no_client_auth(),
+    )
 }
 
 async fn reconnect(
@@ -184,7 +200,14 @@ async fn reconnect(
     open_tasks: &Arc<Mutex<Vec<NodeMessage>>>,
 ) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
     for addr in &config.master_addresses {
-        match connect(addr, is_local_ip(&join_info.ip), &join_info.ip).await {
+        match connect(
+            addr,
+            is_local_ip(&join_info.ip),
+            &join_info.ip,
+            config.ca_cert_path.as_deref(),
+        )
+        .await
+        {
             Ok(mut s) => {
                 println!("Reconnected to Master Node at {}", addr);
 
@@ -240,6 +263,7 @@ async fn handle_connection(
     target: String,
     port: u16,
     tasks: Arc<Mutex<Vec<NodeMessage>>>,
+    ca_path: Option<&str>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let addr = format!("{}:{}", target, port);
     let use_tls = !is_local_ip(&target);
@@ -250,10 +274,7 @@ async fn handle_connection(
     tokio::select! {
         Ok(sock) = connect_fut => {
             if use_tls {
-                let config = rustls::ClientConfig::builder()
-                    .with_safe_defaults()
-                    .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
-                    .with_no_client_auth();
+                let config = build_tls_config(ca_path)?;
                 let connector = TlsConnector::from(Arc::new(config));
                 let server_name = rustls::ServerName::try_from(target.as_str())?;
                 let tls = connector.connect(server_name, sock).await?;
@@ -264,10 +285,7 @@ async fn handle_connection(
         }
         Ok((sock, _)) = listener.accept() => {
             if use_tls {
-                let config = rustls::ClientConfig::builder()
-                    .with_safe_defaults()
-                    .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
-                    .with_no_client_auth();
+                let config = build_tls_config(ca_path)?;
                 let connector = TlsConnector::from(Arc::new(config));
                 let server_name = rustls::ServerName::try_from(target.as_str())?;
                 let tls = connector.connect(server_name, sock).await?;
