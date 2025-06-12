@@ -11,7 +11,7 @@ use std::{
     fs,
     sync::{Arc, Mutex},
 };
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{stdin, AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 use tokio::net::TcpListener;
 use tokio_rustls::{rustls, TlsAcceptor};
 use uuid::Uuid;
@@ -122,6 +122,55 @@ fn assign_tasks_to_nodes(master: &MasterNode) {
     }
 }
 
+async fn run_shell(master: Arc<MasterNode>) {
+    let mut lines = BufReader::new(stdin()).lines();
+    println!(
+        "CPCluster shell ready.\nCommands:\n  nodes  - list connected nodes\n  tasks  - list active and pending tasks\n  exit   - quit"
+    );
+    while let Ok(Some(line)) = lines.next_line().await {
+        match line.trim() {
+            "nodes" => {
+                let nodes = master.connected_nodes.lock().unwrap();
+                if nodes.is_empty() {
+                    println!("No connected nodes");
+                } else {
+                    for addr in nodes.keys() {
+                        println!("{}", addr);
+                    }
+                }
+            }
+            "tasks" => {
+                let nodes = master.connected_nodes.lock().unwrap();
+                if nodes.is_empty() {
+                    println!("No active tasks");
+                } else {
+                    for (addr, info) in nodes.iter() {
+                        for (id, task) in info.active_tasks.iter() {
+                            println!("{}: {} -> {:?}", addr, id, task);
+                        }
+                    }
+                }
+                drop(nodes);
+                let pending = master.pending_tasks.lock().unwrap();
+                if pending.is_empty() {
+                    println!("No pending tasks");
+                } else {
+                    println!("Pending tasks:");
+                    for (id, task) in pending.iter() {
+                        println!("{} -> {:?}", id, task);
+                    }
+                }
+            }
+            "exit" | "quit" => {
+                println!("Exiting shell");
+                break;
+            }
+            cmd if cmd.is_empty() => {}
+            _ => println!("Unknown command"),
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     env_logger::init();
@@ -168,6 +217,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         pending_tasks: Arc::new(Mutex::new(HashMap::new())),
     });
     load_state(&master_node);
+
+    let shell_master = Arc::clone(&master_node);
+    tokio::spawn(async move {
+        run_shell(shell_master).await;
+    });
 
     // Cleanup task to remove nodes that stopped sending heartbeats
     let cleanup_master = Arc::clone(&master_node);
