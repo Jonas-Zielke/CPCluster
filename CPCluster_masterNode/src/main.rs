@@ -25,13 +25,17 @@ where
 {
     loop {
         let task = {
-            let mut pending = master.pending_tasks.lock().unwrap();
-            if let Some((id, task)) = pending.iter().next().map(|(i, t)| (i.clone(), t.clone())) {
-                pending.remove(&id);
-                Some((id, task))
-            } else {
-                None
-            }
+            let pending = master.pending_tasks.lock().unwrap();
+            let nodes = master.connected_nodes.lock().unwrap();
+
+            pending
+                .iter()
+                .find(|(id, _)| {
+                    !nodes
+                        .values()
+                        .any(|n| n.active_tasks.contains_key(*id))
+                })
+                .map(|(id, task)| (id.clone(), task.clone()))
         };
 
         if let Some((id, task)) = task {
@@ -302,6 +306,7 @@ where
                             n.active_tasks.remove(&id);
                         });
                     master_node.pending_tasks.lock().unwrap().remove(&id);
+                    save_state(&master_node);
                 }
                 _ => println!("Unknown request"),
             }
