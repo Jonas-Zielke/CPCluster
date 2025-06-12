@@ -141,14 +141,20 @@ async fn run_shell(master: Arc<MasterNode>) {
             }
             "tasks" => {
                 let nodes = master.connected_nodes.lock().unwrap();
-                for (addr, info) in nodes.iter() {
-                    for (id, task) in info.active_tasks.iter() {
-                        println!("{}: {} -> {:?}", addr, id, task);
+                if nodes.is_empty() {
+                    println!("No active tasks");
+                } else {
+                    for (addr, info) in nodes.iter() {
+                        for (id, task) in info.active_tasks.iter() {
+                            println!("{}: {} -> {:?}", addr, id, task);
+                        }
                     }
                 }
                 drop(nodes);
                 let pending = master.pending_tasks.lock().unwrap();
-                if !pending.is_empty() {
+                if pending.is_empty() {
+                    println!("No pending tasks");
+                } else {
                     println!("Pending tasks:");
                     for (id, task) in pending.iter() {
                         println!("{} -> {:?}", id, task);
