@@ -32,5 +32,5 @@ These types are `serde` serializable and are used by both the `cpcluster_mastern
 
 ## Helper Functions
 
-- `isLocalIp(&str)` – returns `true` if the provided IP address is part of a private
+- `is_local_ip(&str)` – returns `true` if the provided IP address is part of a private
   network. This allows the nodes to decide whether to enable TLS.
