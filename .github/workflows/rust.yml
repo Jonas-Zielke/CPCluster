@@ -20,6 +20,7 @@ jobs:
           - CPCluster_masterNode
           - CPCluster_node
           - cpcluster_common
+          - cpcluster_client
 
     steps:
     - uses: actions/checkout@v4
