@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::{error::Error, fs};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
@@ -31,13 +31,14 @@ impl Default for Config {
 impl Config {
     pub fn load(path: &str) -> std::io::Result<Self> {
         match fs::read_to_string(path) {
-            Ok(data) => serde_json::from_str(&data)
-                .map_err(std::io::Error::other),
+            Ok(data) => serde_json::from_str(&data).map_err(std::io::Error::other),
             Err(_) => Ok(Config::default()),
         }
     }
 
-    pub fn save(&self, path: &str) -> std::io::Result<()> {
-        fs::write(path, serde_json::to_string_pretty(self).unwrap())
+    pub fn save(&self, path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let data = serde_json::to_string_pretty(self)?;
+        fs::write(path, data)?;
+        Ok(())
     }
 }
