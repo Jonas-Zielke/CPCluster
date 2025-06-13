@@ -17,12 +17,38 @@ pub struct JoinInfo {
 pub enum Task {
     Compute { expression: Cow<'static, str> },
     HttpRequest { url: String },
+    /// Send data over a TCP connection and return the response bytes.
+    TcpIo {
+        addr: String,
+        port: u16,
+        data: Vec<u8>,
+    },
+    /// Send a UDP datagram and optionally receive a response.
+    UdpIo {
+        addr: String,
+        port: u16,
+        data: Vec<u8>,
+    },
+    /// Perform a complex mathematical computation.
+    ComplexMath { expression: Cow<'static, str> },
+    /// Store arbitrary bytes in memory under the given key.
+    StoreData { key: String, data: Vec<u8> },
+    /// Retrieve previously stored data by key.
+    RetrieveData { key: String },
+    /// Write bytes to disk at the given path.
+    DiskWrite { path: String, data: Vec<u8> },
+    /// Read bytes from disk at the given path.
+    DiskRead { path: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum TaskResult {
     Number(f64),
     Response(String),
+    /// Raw bytes returned from an operation (e.g. TCP/UDP I/O or disk read).
+    Bytes(Vec<u8>),
+    /// Data was successfully stored in memory or on disk.
+    Stored,
     Error(String),
 }
 
