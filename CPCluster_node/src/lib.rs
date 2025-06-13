@@ -5,6 +5,7 @@ use num_complex::Complex64;
 pub mod disk_store;
 pub mod internet_ports;
 pub mod memory_store;
+pub mod node;
 
 use disk_store::DiskStore;
 use internet_ports::InternetPorts;
