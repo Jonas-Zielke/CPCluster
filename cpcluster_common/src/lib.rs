@@ -1,4 +1,5 @@
 //! Shared types for CPCluster nodes, clients, and utilities.
+//! Extended task variants for CPCluster.
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
