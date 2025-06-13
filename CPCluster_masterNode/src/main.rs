@@ -105,33 +105,6 @@ struct MasterNode {
     completed_tasks: Arc<Mutex<HashMap<String, TaskResult>>>,
 }
 
-async fn assign_tasks_to_nodes(master: &MasterNode) {
-    let tasks: Vec<(String, Task)> = {
-        master
-            .pending_tasks
-            .lock()
-            .await
-            .iter()
-            .map(|(id, t)| (id.clone(), t.clone()))
-            .collect()
-    };
-    if tasks.is_empty() {
-        return;
-    }
-    let mut nodes = master.connected_nodes.lock().await;
-    nodes.retain(|_, n| n.is_worker);
-    if nodes.is_empty() {
-        return;
-    }
-    let keys: Vec<String> = nodes.keys().cloned().collect();
-    for (i, (id, task)) in tasks.into_iter().enumerate() {
-        let key = &keys[i % keys.len()];
-        if let Some(node) = nodes.get_mut(key) {
-            node.active_tasks.entry(id).or_insert(task);
-        }
-    }
-}
-
 use tokio::runtime::Handle;
 
 fn run_shell(master: Arc<MasterNode>, rt: Handle) {
@@ -644,7 +617,6 @@ async fn load_state(master: &MasterNode) {
             *master.completed_tasks.lock().await = state.completed_tasks;
         }
     }
-    assign_tasks_to_nodes(master).await;
 }
 
 async fn save_state(master: &MasterNode) {
@@ -663,5 +635,4 @@ async fn save_state(master: &MasterNode) {
     if let Ok(data) = serde_json::to_string_pretty(&state) {
         let _ = tokio::fs::write("master_state.json", data).await;
     }
-    assign_tasks_to_nodes(master).await;
 }
