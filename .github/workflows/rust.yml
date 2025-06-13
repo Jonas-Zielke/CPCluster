@@ -35,6 +35,14 @@ jobs:
       working-directory: ${{ matrix.project }}
       run: cargo build --verbose
 
+    - name: Check formatting for ${{ matrix.project }}
+      working-directory: ${{ matrix.project }}
+      run: cargo fmt -- --check
+
+    - name: Run clippy for ${{ matrix.project }}
+      working-directory: ${{ matrix.project }}
+      run: cargo clippy -- -D warnings
+
     - name: Run tests for ${{ matrix.project }}
       working-directory: ${{ matrix.project }}
       run: cargo test --verbose
