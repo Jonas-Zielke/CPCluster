@@ -7,18 +7,24 @@ use log::{error, info, warn};
 use meval::eval_str;
 use reqwest::Client;
 use rustls_native_certs as native_certs;
-use std::{collections::HashMap, error::Error, fs, sync::Arc};
+use std::{collections::HashMap, error::Error, fs, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::{TcpListener, TcpStream},
+    fs as tokio_fs,
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::{TcpListener, TcpStream, UdpSocket},
+    time::timeout,
 };
 use tokio_rustls::{rustls, TlsConnector};
 
 trait ReadWrite: AsyncRead + AsyncWrite {}
 impl<T: AsyncRead + AsyncWrite + ?Sized> ReadWrite for T {}
 
-async fn execute_task(task: Task, client: &Client) -> TaskResult {
+async fn execute_task(
+    task: Task,
+    client: &Client,
+    store: &Arc<Mutex<HashMap<String, Vec<u8>>>>,
+) -> TaskResult {
     match task {
         Task::Compute { expression } => match eval_str(&expression) {
             Ok(v) => TaskResult::Number(v),
@@ -31,6 +37,65 @@ async fn execute_task(task: Task, client: &Client) -> TaskResult {
             },
             Err(e) => TaskResult::Error(e.to_string()),
         },
+        Task::TcpIo { addr, port, data } => {
+            match TcpStream::connect((addr.as_str(), port)).await {
+                Ok(mut stream) => {
+                    if let Err(e) = stream.write_all(&data).await {
+                        return TaskResult::Error(e.to_string());
+                    }
+                    let mut buf = Vec::new();
+                    match stream.read_to_end(&mut buf).await {
+                        Ok(_) => TaskResult::Bytes(buf),
+                        Err(e) => TaskResult::Error(e.to_string()),
+                    }
+                }
+                Err(e) => TaskResult::Error(e.to_string()),
+            }
+        }
+        Task::UdpIo { addr, port, data } => {
+            match UdpSocket::bind("0.0.0.0:0").await {
+                Ok(socket) => {
+                    if let Err(e) = socket.send_to(&data, (addr.as_str(), port)).await {
+                        return TaskResult::Error(e.to_string());
+                    }
+                    let mut buf = vec![0u8; 65535];
+                    match timeout(Duration::from_secs(1), socket.recv_from(&mut buf)).await {
+                        Ok(Ok((len, _))) => {
+                            buf.truncate(len);
+                            TaskResult::Bytes(buf)
+                        }
+                        _ => TaskResult::Bytes(Vec::new()),
+                    }
+                }
+                Err(e) => TaskResult::Error(e.to_string()),
+            }
+        }
+        Task::ComplexMath { expression } => match eval_str(&expression) {
+            Ok(v) => TaskResult::Number(v),
+            Err(e) => TaskResult::Error(e.to_string()),
+        },
+        Task::StoreData { key, data } => {
+            store.lock().await.insert(key, data);
+            TaskResult::Stored
+        }
+        Task::RetrieveData { key } => {
+            match store.lock().await.get(&key).cloned() {
+                Some(d) => TaskResult::Bytes(d),
+                None => TaskResult::Error("Key not found".into()),
+            }
+        }
+        Task::DiskWrite { path, data } => {
+            match tokio_fs::write(&path, data).await {
+                Ok(_) => TaskResult::Stored,
+                Err(e) => TaskResult::Error(e.to_string()),
+            }
+        }
+        Task::DiskRead { path } => {
+            match tokio_fs::read(&path).await {
+                Ok(d) => TaskResult::Bytes(d),
+                Err(e) => TaskResult::Error(e.to_string()),
+            }
+        }
     }
 }
 
@@ -44,6 +109,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let mut stream: Option<Box<dyn ReadWrite + Unpin + Send>> = None;
     let open_tasks: Arc<Mutex<HashMap<String, NodeMessage>>> = Arc::new(Mutex::new(HashMap::new()));
+    let data_store: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
     for addr in &config.master_addresses {
         match connect(
             addr,
@@ -133,14 +199,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             let tasks = open_tasks.clone();
                             let ca_path = config.ca_cert_path.clone();
                             let ca_cert = config.ca_cert.clone();
+                            let store = data_store.clone();
                             tokio::spawn(async move {
                                 if let Err(e) = handle_connection(
                                     target,
                                     port,
                                     tasks,
+                                    store,
                                     ca_path.as_deref(),
                                     ca_cert.as_deref(),
-                                ).await {
+                                )
+                                .await
+                                {
                                     error!("Direct connection error: {}", e);
                                 }
                             });
@@ -149,7 +219,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             info!("Received heartbeat acknowledgement from master");
                         }
                         NodeMessage::AssignTask { id, task } => {
-                            let result = execute_task(task, &http_client).await;
+                            let result = execute_task(task, &http_client, &data_store).await;
                             let msg = NodeMessage::TaskResult {
                                 id: id.clone(),
                                 result,
@@ -309,6 +379,7 @@ async fn handle_connection(
     target: String,
     port: u16,
     tasks: Arc<Mutex<HashMap<String, NodeMessage>>>,
+    data_store: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     ca_path: Option<&str>,
     ca_cert: Option<&str>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -350,7 +421,7 @@ async fn handle_connection(
             Err(_) => break,
         };
         if let Ok(NodeMessage::AssignTask { id, task }) = serde_json::from_slice(&buf) {
-            let result = execute_task(task, &client).await;
+            let result = execute_task(task, &client, &data_store).await;
             let msg = NodeMessage::TaskResult {
                 id: id.clone(),
                 result,
