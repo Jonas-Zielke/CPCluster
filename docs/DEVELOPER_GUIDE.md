@@ -34,9 +34,18 @@ Nodes periodically send heartbeats. If one fails, the failover timeout defined i
 ## Contribution hints
 
 1. Make sure [Rust](https://www.rust-lang.org/) is installed. You can run `./setup_container.sh` from the repository root to install all dependencies and build the project.
-2. Build each crate individually using `cargo build` inside `CPCluster_masterNode` and `CPCluster_node`.
-3. Run nodes separately in different terminals with `cargo run`.
-4. Runtime options such as port ranges or master addresses are loaded from `config.json` via the `Config` helper in `cpcluster_common`.
+2. Install the `rustfmt` and `clippy` components with:
+   ```bash
+   rustup component add rustfmt clippy
+   ```
+3. Before committing, format the code and run lints:
+   ```bash
+   cargo fmt
+   cargo clippy
+   ```
+4. Build each crate individually using `cargo build` inside `CPCluster_masterNode` and `CPCluster_node`.
+5. Run nodes separately in different terminals with `cargo run`.
+6. Runtime options such as port ranges or master addresses are loaded from `config.json` via the `Config` helper in `cpcluster_common`.
 
 ## Additional documentation
 
