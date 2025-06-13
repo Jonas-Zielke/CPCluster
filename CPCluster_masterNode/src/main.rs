@@ -259,7 +259,7 @@ fn run_shell(master: Arc<MasterNode>) {
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     env_logger::init();
     let config = Config::load("config.json").unwrap_or_default();
-    config.save("config.json").ok();
+    config.save("config.json")?;
 
     let token = generate_token();
     let addr = config
