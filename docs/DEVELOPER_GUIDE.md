@@ -36,19 +36,20 @@ Nodes periodically send heartbeats. If one fails, the failover timeout defined i
 Nodes can operate in different roles defined in `config.json`:
 
 - `Worker` – default mode executing tasks purely in memory.
-- `Disk` – provides persistent storage using `storage_dir` and `disk_space_mb`.
-- `Internet` – reachable from public networks and always uses TLS.
+- `Disk` – persists data in `storage_dir` with a `disk_space_mb` quota.
+- `Internet` – reachable from public networks, uses TLS and opens ports listed in `internet_ports`.
 
 Important configuration fields include:
 
 - `storage_dir` – directory used for disk tasks or shared RAM disks.
 - `disk_space_mb` – quota for disk nodes.
+- `role` – choose `Worker`, `Disk` or `Internet`.
 - `failover_timeout_ms` and `master_addresses` – reconnection behaviour.
 - `internet_ports` – list of ports bound by Internet nodes.
 
-`cpcluster_common::Task` includes variants such as `Tcp`, `Udp`, `ComplexMath`, `StoreData`, `RetrieveData`, `DiskWrite` and `DiskRead` in addition to compute and HTTP requests.
-
+`cpcluster_common::Task` includes variants such as `Tcp`, `Udp`, `ComplexMath`, `StoreData`, `RetrieveData`, `DiskWrite`, `DiskRead`, `GetGlobalRam` and `GetStorage` in addition to compute and HTTP requests.
 ## Contribution hints
+
 
 1. Make sure [Rust](https://www.rust-lang.org/) is installed. You can run `./setup_container.sh` from the repository root to install all dependencies and build the project.
 2. Install the `rustfmt` and `clippy` components with:
