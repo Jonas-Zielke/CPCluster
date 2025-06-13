@@ -25,10 +25,7 @@ impl DiskStore {
     }
 
     pub async fn load(&self, id: &str) -> Option<Vec<u8>> {
-        match fs::read(self.dir.join(id)).await {
-            Ok(d) => Some(d),
-            Err(_) => None,
-        }
+        fs::read(self.dir.join(id)).await.ok()
     }
 }
 

@@ -4,17 +4,12 @@ use std::borrow::Cow;
 pub mod config;
 pub use config::Config;
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub enum NodeRole {
+    #[default]
     Worker,
     Disk,
     Internet,
-}
-
-impl Default for NodeRole {
-    fn default() -> Self {
-        NodeRole::Worker
-    }
 }
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};

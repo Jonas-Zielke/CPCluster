@@ -313,6 +313,7 @@ async fn reconnect(
     )))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_connection(
     target: String,
     port: u16,
