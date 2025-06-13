@@ -9,10 +9,11 @@ use std::{
     collections::{HashMap, HashSet},
     error::Error,
     fs,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use tokio_rustls::{rustls, TlsAcceptor};
 use uuid::Uuid;
 
@@ -24,15 +25,15 @@ async fn send_pending_tasks<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    if let Some(node) = master.connected_nodes.lock().unwrap().get(addr) {
+    if let Some(node) = master.connected_nodes.lock().await.get(addr) {
         if !node.is_worker {
             return Ok(());
         }
     }
     loop {
         let next_task = {
-            let mut pending = master.pending_tasks.lock().unwrap();
-            let nodes = master.connected_nodes.lock().unwrap();
+            let mut pending = master.pending_tasks.lock().await;
+            let nodes = master.connected_nodes.lock().await;
 
             if let Some((id, task)) = pending
                 .iter()
@@ -54,7 +55,7 @@ where
         master
             .connected_nodes
             .lock()
-            .unwrap()
+            .await
             .entry(addr.to_string())
             .and_modify(|n| {
                 n.active_tasks.insert(id.clone(), task.clone());
@@ -69,12 +70,12 @@ where
             master
                 .pending_tasks
                 .lock()
-                .unwrap()
+                .await
                 .insert(id.clone(), task.clone());
             master
                 .connected_nodes
                 .lock()
-                .unwrap()
+                .await
                 .entry(addr.to_string())
                 .and_modify(|n| {
                     n.active_tasks.remove(&id);
@@ -108,8 +109,7 @@ fn assign_tasks_to_nodes(master: &MasterNode) {
     let tasks: Vec<(String, Task)> = {
         master
             .pending_tasks
-            .lock()
-            .unwrap()
+            .blocking_lock()
             .iter()
             .map(|(id, t)| (id.clone(), t.clone()))
             .collect()
@@ -117,7 +117,7 @@ fn assign_tasks_to_nodes(master: &MasterNode) {
     if tasks.is_empty() {
         return;
     }
-    let mut nodes = master.connected_nodes.lock().unwrap();
+    let mut nodes = master.connected_nodes.blocking_lock();
     nodes.retain(|_, n| n.is_worker);
     if nodes.is_empty() {
         return;
@@ -145,7 +145,7 @@ fn run_shell(master: Arc<MasterNode>) {
         for cmd in line.split(';') {
             match cmd.trim() {
                 "nodes" => {
-                    let nodes = master.connected_nodes.lock().unwrap();
+                    let nodes = master.connected_nodes.blocking_lock();
                     if nodes.is_empty() {
                         println!("No connected nodes");
                     } else {
@@ -155,7 +155,7 @@ fn run_shell(master: Arc<MasterNode>) {
                     }
                 }
                 "tasks" => {
-                    let nodes = master.connected_nodes.lock().unwrap();
+                    let nodes = master.connected_nodes.blocking_lock();
                     if nodes.is_empty() {
                         println!("No active tasks");
                     } else {
@@ -166,7 +166,7 @@ fn run_shell(master: Arc<MasterNode>) {
                         }
                     }
                     drop(nodes);
-                    let pending = master.pending_tasks.lock().unwrap();
+                    let pending = master.pending_tasks.blocking_lock();
                     if pending.is_empty() {
                         println!("No pending tasks");
                     } else {
@@ -176,7 +176,7 @@ fn run_shell(master: Arc<MasterNode>) {
                         }
                     }
                     drop(pending);
-                    let completed = master.completed_tasks.lock().unwrap();
+                    let completed = master.completed_tasks.blocking_lock();
                     if completed.is_empty() {
                         println!("No completed tasks");
                     } else {
@@ -192,17 +192,16 @@ fn run_shell(master: Arc<MasterNode>) {
                         println!("Usage: task <id>");
                     } else {
                         let id = parts[1];
-                        if master.pending_tasks.lock().unwrap().contains_key(id) {
+                        if master.pending_tasks.blocking_lock().contains_key(id) {
                             println!("Task {} is pending", id);
                         } else if master
                             .connected_nodes
-                            .lock()
-                            .unwrap()
+                            .blocking_lock()
                             .values()
                             .any(|n| n.active_tasks.contains_key(id))
                         {
                             println!("Task {} is running", id);
-                        } else if let Some(result) = master.completed_tasks.lock().unwrap().get(id)
+                        } else if let Some(result) = master.completed_tasks.blocking_lock().get(id)
                         {
                             println!("Task {} finished: {:?}", id, result);
                         } else {
@@ -230,8 +229,7 @@ fn run_shell(master: Arc<MasterNode>) {
                         };
                         master
                             .pending_tasks
-                            .lock()
-                            .unwrap()
+                            .blocking_lock()
                             .insert(id.clone(), task);
                         save_state(&master);
                         println!("Queued task {}", id);
@@ -369,7 +367,7 @@ where
         write_length_prefixed(&mut socket, b"OK").await?;
 
         // Füge die Node zur verbundenen Liste hinzu
-        master_node.connected_nodes.lock().unwrap().insert(
+        master_node.connected_nodes.lock().await.insert(
             addr.clone(),
             NodeInfo {
                 addr: addr.clone(),
@@ -401,7 +399,7 @@ where
                     let connected_nodes = master_node
                         .connected_nodes
                         .lock()
-                        .unwrap()
+                        .await
                         .keys()
                         .cloned()
                         .collect::<Vec<String>>();
@@ -417,14 +415,14 @@ where
                         master_node
                             .connected_nodes
                             .lock()
-                            .unwrap()
+                            .await
                             .entry(addr.clone())
                             .and_modify(|n| n.port = Some(port));
                         // Hole die Adresse der Ziel-Node
                         let target_addr = master_node
                             .connected_nodes
                             .lock()
-                            .unwrap()
+                            .await
                             .get(&target_id)
                             .cloned()
                             .map(|n| n.addr);
@@ -446,19 +444,14 @@ where
                     master_node
                         .pending_tasks
                         .lock()
-                        .unwrap()
+                        .await
                         .insert(id.clone(), task);
                     save_state(&master_node);
                     let ack = serde_json::to_vec(&NodeMessage::TaskAccepted(id))?;
                     write_length_prefixed(&mut socket, &ack).await?;
                 }
                 NodeMessage::GetTaskResult(id) => {
-                    let result_opt = master_node
-                        .completed_tasks
-                        .lock()
-                        .unwrap()
-                        .get(&id)
-                        .cloned();
+                    let result_opt = master_node.completed_tasks.lock().await.get(&id).cloned();
                     if let Some(result) = result_opt {
                         let resp = NodeMessage::TaskResult { id, result };
                         let data = serde_json::to_vec(&resp)?;
@@ -473,7 +466,7 @@ where
                     // Entferne die Node und gebe den Port frei
                     info!("Node disconnected and port released.");
                     release_port(&master_node, addr.clone());
-                    master_node.connected_nodes.lock().unwrap().remove(&addr);
+                    master_node.connected_nodes.lock().await.remove(&addr);
                     save_state(&master_node);
                     break;
                 }
@@ -481,7 +474,7 @@ where
                     master_node
                         .connected_nodes
                         .lock()
-                        .unwrap()
+                        .await
                         .entry(addr.clone())
                         .and_modify(|n| {
                             n.last_heartbeat = now_ms();
@@ -495,16 +488,16 @@ where
                     master_node
                         .connected_nodes
                         .lock()
-                        .unwrap()
+                        .await
                         .entry(addr.clone())
                         .and_modify(|n| {
                             n.active_tasks.remove(&id);
                         });
-                    master_node.pending_tasks.lock().unwrap().remove(&id);
+                    master_node.pending_tasks.lock().await.remove(&id);
                     master_node
                         .completed_tasks
                         .lock()
-                        .unwrap()
+                        .await
                         .insert(id.clone(), result);
                     save_state(&master_node);
                 }
@@ -517,7 +510,7 @@ where
         }
 
         // Entferne die Node aus der Liste der verbundenen Nodes
-        master_node.connected_nodes.lock().unwrap().remove(&addr);
+        master_node.connected_nodes.lock().await.remove(&addr);
         save_state(&master_node);
     } else {
         warn!("Client provided an invalid token {}", received_token);
@@ -533,7 +526,7 @@ fn generate_token() -> String {
 
 fn allocate_port(master_node: &MasterNode) -> Option<u16> {
     let port = {
-        let mut ports = master_node.available_ports.lock().unwrap();
+        let mut ports = master_node.available_ports.blocking_lock();
         let port_opt = ports.iter().cloned().next();
         if let Some(p) = port_opt {
             ports.remove(&p);
@@ -550,11 +543,11 @@ fn allocate_port(master_node: &MasterNode) -> Option<u16> {
 
 fn release_port(master_node: &MasterNode, addr: String) {
     let port = {
-        let mut nodes = master_node.connected_nodes.lock().unwrap();
+        let mut nodes = master_node.connected_nodes.blocking_lock();
         nodes.get_mut(&addr).and_then(|info| info.port.take())
     };
     if let Some(p) = port {
-        master_node.available_ports.lock().unwrap().insert(p);
+        master_node.available_ports.blocking_lock().insert(p);
     }
     save_state(master_node);
 }
@@ -571,7 +564,7 @@ fn cleanup_dead_nodes(master: &MasterNode) {
     let now = now_ms();
     let mut stale = Vec::new();
     {
-        let nodes = master.connected_nodes.lock().unwrap();
+        let nodes = master.connected_nodes.blocking_lock();
         for (addr, info) in nodes.iter() {
             if now.saturating_sub(info.last_heartbeat) > timeout {
                 stale.push(addr.clone());
@@ -580,8 +573,9 @@ fn cleanup_dead_nodes(master: &MasterNode) {
     }
     for addr in stale {
         warn!("Node {} timed out", addr);
-        if let Some(info) = master.connected_nodes.lock().unwrap().remove(&addr) {
-            let mut pending = master.pending_tasks.lock().unwrap();
+        let info_opt = { master.connected_nodes.blocking_lock().remove(&addr) };
+        if let Some(info) = info_opt {
+            let mut pending = master.pending_tasks.blocking_lock();
             for (id, task) in info.active_tasks {
                 pending.insert(id, task);
             }
@@ -639,10 +633,10 @@ struct MasterState {
 fn load_state(master: &MasterNode) {
     if let Ok(data) = fs::read_to_string("master_state.json") {
         if let Ok(state) = serde_json::from_str::<MasterState>(&data) {
-            *master.connected_nodes.lock().unwrap() = state.connected_nodes;
-            *master.available_ports.lock().unwrap() = state.available_ports.into_iter().collect();
-            *master.pending_tasks.lock().unwrap() = state.pending_tasks;
-            *master.completed_tasks.lock().unwrap() = state.completed_tasks;
+            *master.connected_nodes.blocking_lock() = state.connected_nodes;
+            *master.available_ports.blocking_lock() = state.available_ports.into_iter().collect();
+            *master.pending_tasks.blocking_lock() = state.pending_tasks;
+            *master.completed_tasks.blocking_lock() = state.completed_tasks;
         }
     }
     assign_tasks_to_nodes(master);
@@ -650,16 +644,15 @@ fn load_state(master: &MasterNode) {
 
 fn save_state(master: &MasterNode) {
     let state = MasterState {
-        connected_nodes: master.connected_nodes.lock().unwrap().clone(),
+        connected_nodes: master.connected_nodes.blocking_lock().clone(),
         available_ports: master
             .available_ports
-            .lock()
-            .unwrap()
+            .blocking_lock()
             .iter()
             .cloned()
             .collect(),
-        pending_tasks: master.pending_tasks.lock().unwrap().clone(),
-        completed_tasks: master.completed_tasks.lock().unwrap().clone(),
+        pending_tasks: master.pending_tasks.blocking_lock().clone(),
+        completed_tasks: master.completed_tasks.blocking_lock().clone(),
     };
     if let Ok(data) = serde_json::to_string_pretty(&state) {
         let _ = fs::write("master_state.json", data);

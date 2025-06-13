@@ -7,11 +7,8 @@ use log::{error, info, warn};
 use meval::eval_str;
 use reqwest::Client;
 use rustls_native_certs as native_certs;
-use std::{
-    error::Error,
-    fs,
-    sync::{Arc, Mutex},
-};
+use std::{error::Error, fs, sync::Arc};
+use tokio::sync::Mutex;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpListener, TcpStream},
@@ -155,11 +152,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             id: id.clone(),
                             result,
                         };
-                        open_tasks.lock().unwrap().push(msg.clone());
+                        open_tasks.lock().await.push(msg.clone());
                         if let Err(e) = send_message(&mut stream, msg.clone()).await {
                             warn!("Failed to send task result: {}", e);
                         }
-                        open_tasks.lock().unwrap().retain(|m| match m {
+                        open_tasks.lock().await.retain(|m| match m {
                             NodeMessage::TaskResult { id: rid, .. } => rid != &id,
                             _ => true,
                         });
@@ -284,7 +281,7 @@ async fn reconnect(
                 }
 
                 // resend open tasks
-                let tasks = open_tasks.lock().unwrap().clone();
+                let tasks = open_tasks.lock().await.clone();
                 for task in tasks {
                     if let Err(e) = send_message(&mut s, task.clone()).await {
                         warn!("Failed to resend task: {}", e);
@@ -354,9 +351,9 @@ async fn handle_connection(
                 id: id.clone(),
                 result,
             };
-            tasks.lock().unwrap().push(msg.clone());
+            tasks.lock().await.push(msg.clone());
             send_message(&mut stream, msg.clone()).await?;
-            tasks.lock().unwrap().retain(|m| match m {
+            tasks.lock().await.retain(|m| match m {
                 NodeMessage::TaskResult { id: rid, .. } => rid != &id,
                 _ => true,
             });
