@@ -44,3 +44,10 @@ let store = MemoryStore::new();
 store.store("example".into(), b"data".to_vec()).await;
 let data = store.load("example").await;
 ```
+
+### Shared-memory storage
+
+When `storage_dir` points to a tmpfs or RAM-disk (for example `/dev/shm/cpcluster`)
+and the node role is `Worker`, tasks can use `DiskWrite` and `DiskRead` as a
+lightweight shared-memory channel between processes. Disk nodes apply the same
+mechanism but persist the files on disk while respecting `disk_space_mb`.

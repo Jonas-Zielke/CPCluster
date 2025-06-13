@@ -11,9 +11,12 @@ For an overview of the repository structure see docs/PROJECT_OVERVIEW.md.
 - **Direct Node-to-Node Communication**: Nodes establish direct communication channels after being connected, allowing efficient data transfer with minimal latency.
 - **Token-based Authentication**: Nodes authenticate with the master using a unique token stored in a `join.json` file.
  - **Disconnect Handling**: The master node manages disconnections and releases ports when nodes leave the network.
- - **Optional TLS Encryption**: When nodes communicate across the internet, connections to the master node are automatically upgraded to TLS using `tokio-rustls`.
- - **Redundant Masters**: Clients can specify multiple master addresses and automatically fail over if one becomes unavailable.
- - **Heartbeat Monitoring**: Nodes periodically send heartbeats and the master removes entries if a node stops responding.
+- **Optional TLS Encryption**: When nodes communicate across the internet, connections to the master node are automatically upgraded to TLS using `tokio-rustls`.
+- **Redundant Masters**: Clients can specify multiple master addresses and automatically fail over if one becomes unavailable.
+- **Heartbeat Monitoring**: Nodes periodically send heartbeats and the master removes entries if a node stops responding.
+- **Node Roles**: Nodes can run as `Worker` (default), `Disk` or `Internet`. Disk
+  nodes provide persistent storage while Internet nodes are reachable from public
+  networks and always use TLS.
 
 ## Project Structure
 
@@ -98,6 +101,9 @@ For an overview of the repository structure see docs/PROJECT_OVERVIEW.md.
    - Node A and Node B then establish a direct connection on the assigned port.
    - Once connected they can exchange tasks. For example Node A can send `AssignTask` with `Compute { expression: "1+2" }` and Node B replies with `TaskResult::Number(3.0)`.
    - Another example is `HttpRequest { url: "https://example.com" }` which lets a node fetch the page body and return it as `TaskResult::Response`.
+   - Additional task types include `Tcp` and `Udp` for raw socket communication,
+     `ComplexMath` for complex numbers, in-memory `StoreData`/`RetrieveData`, and
+     `DiskWrite`/`DiskRead` for persistent storage.
 4. **Handling Disconnection**:
    - If a node disconnects, the master releases the assigned port for future connections and notifies the other node if necessary.
 
@@ -138,6 +144,27 @@ addtask http https://example.com
 ```
 
 Ensure each node uses the same `join.json` for authentication with the master node.
+
+### Node Configuration Examples
+
+Disk node reserving 2 GB for persistent tasks:
+
+```json
+{
+  "role": "Disk",
+  "storage_dir": "/var/cpcluster",
+  "disk_space_mb": 2048
+}
+```
+
+Worker node using a RAM disk for shared memory between tasks:
+
+```json
+{
+  "role": "Worker",
+  "storage_dir": "/dev/shm/cpcluster"
+}
+```
 
 For additional information on the code layout and contribution hints see
 [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md).
