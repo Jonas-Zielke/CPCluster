@@ -4,7 +4,7 @@ use cpcluster_common::{read_length_prefixed, write_length_prefixed};
 use log::{error, info, warn};
 use rcgen::generate_simple_self_signed;
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -109,12 +109,35 @@ struct MasterNode {
 
 use tokio::runtime::Handle;
 
+async fn submit_task_and_wait(
+    master: &MasterNode,
+    task: Task,
+    timeout_ms: u64,
+) -> Option<TaskResult> {
+    let id = Uuid::new_v4().to_string();
+    master.pending_tasks.lock().await.insert(id.clone(), task);
+    save_state(master).await;
+    let start = Instant::now();
+    loop {
+        if let Some(result) = master.completed_tasks.lock().await.remove(&id) {
+            save_state(master).await;
+            return Some(result);
+        }
+        if start.elapsed().as_millis() as u64 > timeout_ms {
+            master.pending_tasks.lock().await.remove(&id);
+            save_state(master).await;
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 fn run_shell(master: Arc<MasterNode>, rt: Handle) {
     use std::io::{self, BufRead, Write};
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
     println!(
-        "CPCluster shell ready.\nCommands:\n  nodes                - list connected nodes\n  tasks                - list active and pending tasks\n  task <id>            - show status or result of a task\n  addtask <type> <arg> - queue a task (type: compute|http)\n  exit                 - quit"
+        "CPCluster shell ready.\nCommands:\n  nodes                - list connected nodes\n  tasks                - list active and pending tasks\n  task <id>            - show status or result of a task\n  addtask <type> <arg> - queue a task (type: compute|http)\n  getglobalram         - show memory usage of a worker\n  getstorage           - show disk usage of a disk node\n  exit                 - quit"
     );
     print!("> ");
     let _ = std::io::stdout().flush();
@@ -212,6 +235,20 @@ fn run_shell(master: Arc<MasterNode>, rt: Handle) {
                             .insert(id.clone(), task);
                         rt.block_on(save_state(&master));
                         println!("Queued task {}", id);
+                    }
+                }
+                "getglobalram" => {
+                    match rt.block_on(submit_task_and_wait(&master, Task::GetGlobalRam, 5000)) {
+                        Some(TaskResult::Response(r)) => println!("{}", r.trim()),
+                        Some(TaskResult::Error(e)) => println!("Error: {}", e),
+                        _ => println!("Failed to retrieve RAM stats"),
+                    }
+                }
+                "getstorage" => {
+                    match rt.block_on(submit_task_and_wait(&master, Task::GetStorage, 5000)) {
+                        Some(TaskResult::Response(r)) => println!("{}", r.trim()),
+                        Some(TaskResult::Error(e)) => println!("Error: {}", e),
+                        _ => println!("Failed to retrieve storage stats"),
                     }
                 }
                 "exit" | "quit" => {
