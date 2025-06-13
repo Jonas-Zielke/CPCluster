@@ -1,6 +1,6 @@
+use crate::NodeRole;
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fs};
-use crate::NodeRole;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {

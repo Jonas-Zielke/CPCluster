@@ -1,5 +1,5 @@
 use cpcluster_common::config::Config;
-use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, Task, TaskResult, NodeRole};
+use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, NodeRole, Task, TaskResult};
 use cpcluster_common::{read_length_prefixed, write_length_prefixed};
 use log::{error, info, warn};
 use rcgen::generate_simple_self_signed;

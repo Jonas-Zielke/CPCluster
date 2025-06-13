@@ -2,7 +2,7 @@ use cpcluster_common::config::Config;
 use cpcluster_common::{
     is_local_ip, read_length_prefixed, write_length_prefixed, JoinInfo, NodeMessage,
 };
-use cpcluster_node::{execute_task, memory_store::MemoryStore, disk_store::DiskStore};
+use cpcluster_node::{disk_store::DiskStore, execute_task, memory_store::MemoryStore};
 use log::{error, info, warn};
 use reqwest::Client;
 use rustls_native_certs as native_certs;
@@ -361,14 +361,7 @@ async fn handle_connection(
             Err(_) => break,
         };
         if let Ok(NodeMessage::AssignTask { id, task }) = serde_json::from_slice(&buf) {
-            let result = execute_task(
-                task,
-                &client,
-                storage_dir,
-                &memory,
-                disk.as_ref(),
-            )
-            .await;
+            let result = execute_task(task, &client, storage_dir, &memory, disk.as_ref()).await;
             let msg = NodeMessage::TaskResult {
                 id: id.clone(),
                 result,

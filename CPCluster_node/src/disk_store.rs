@@ -9,7 +9,10 @@ pub struct DiskStore {
 
 impl DiskStore {
     pub fn new(dir: PathBuf, quota_mb: u64) -> Self {
-        Self { dir, quota_bytes: quota_mb * 1024 * 1024 }
+        Self {
+            dir,
+            quota_bytes: quota_mb * 1024 * 1024,
+        }
     }
 
     pub async fn store(&self, id: String, data: Vec<u8>) -> std::io::Result<()> {

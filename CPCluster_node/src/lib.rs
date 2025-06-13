@@ -2,11 +2,11 @@ use cpcluster_common::{Task, TaskResult};
 use meval::shunting_yard::to_rpn;
 use meval::tokenizer::{tokenize, Operation, Token};
 use num_complex::Complex64;
-pub mod memory_store;
 pub mod disk_store;
+pub mod memory_store;
 
-use memory_store::MemoryStore;
 use disk_store::DiskStore;
+use memory_store::MemoryStore;
 use reqwest::Client;
 use std::path::Path;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
