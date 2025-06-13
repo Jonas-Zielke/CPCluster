@@ -51,3 +51,5 @@ When `storage_dir` points to a tmpfs or RAM-disk (for example `/dev/shm/cpcluste
 and the node role is `Worker`, tasks can use `DiskWrite` and `DiskRead` as a
 lightweight shared-memory channel between processes. Disk nodes apply the same
 mechanism but persist the files on disk while respecting `disk_space_mb`.
+
+The node also exposes `GetGlobalRam` and `GetStorage` tasks. `GetGlobalRam` lists all in-memory keys with their sizes while `GetStorage` reports disk usage when a disk store is configured.

@@ -14,9 +14,7 @@ For an overview of the repository structure see docs/PROJECT_OVERVIEW.md.
 - **Optional TLS Encryption**: When nodes communicate across the internet, connections to the master node are automatically upgraded to TLS using `tokio-rustls`.
 - **Redundant Masters**: Clients can specify multiple master addresses and automatically fail over if one becomes unavailable.
 - **Heartbeat Monitoring**: Nodes periodically send heartbeats and the master removes entries if a node stops responding.
-- **Node Roles**: Nodes can run as `Worker` (default), `Disk` or `Internet`. Disk
-  nodes provide persistent storage while Internet nodes are reachable from public
-  networks and always use TLS.
+- **Node Roles**: Nodes can run as `Worker` (default), `Disk` or `Internet`. Disk nodes persist data in `storage_dir` up to `disk_space_mb`. Internet nodes expose ports from `internet_ports` for network tasks and always use TLS.
 
 ## Project Structure
 
@@ -65,7 +63,7 @@ For an overview of the repository structure see docs/PROJECT_OVERVIEW.md.
 
 1. **Generate join.json**: When the master node is started, it creates a `join.json` file with a unique token for network access.
 2. **Copy `join.json` to nodes**: Each node must have a `join.json` file identical to the one in the master node directory. Copy this file to the `CPCluster_node` directory for each node that will join the network.
-3. **Edit `config.json`**: Both master and nodes read runtime options from `config.json`. You can configure the port range, failover timeout, a list of master node addresses and optional paths to TLS certificates. Nodes may specify `ca_cert` or `ca_cert_path` to verify the master's certificate and the master can use `cert_path`/`key_path` for its own certificate and private key.
+3. **Edit `config.json`**: Both master and nodes read runtime options from `config.json`. You can configure the port range, failover timeout, master addresses and TLS certificates. Additional fields include `role` (`Worker`, `Disk`, `Internet`), `storage_dir`, `disk_space_mb` and `internet_ports`.
 4. **Generate TLS certificates (optional)**: To secure traffic between nodes and the master, create a certificate for the master node and distribute it to all nodes:
    ```bash
    openssl req -x509 -newkey rsa:4096 -nodes -keyout master_key.pem \
@@ -102,8 +100,9 @@ For an overview of the repository structure see docs/PROJECT_OVERVIEW.md.
    - Once connected they can exchange tasks. For example Node A can send `AssignTask` with `Compute { expression: "1+2" }` and Node B replies with `TaskResult::Number(3.0)`.
    - Another example is `HttpRequest { url: "https://example.com" }` which lets a node fetch the page body and return it as `TaskResult::Response`.
    - Additional task types include `Tcp` and `Udp` for raw socket communication,
-     `ComplexMath` for complex numbers, in-memory `StoreData`/`RetrieveData`, and
-     `DiskWrite`/`DiskRead` for persistent storage.
+     `ComplexMath` for complex numbers, in-memory `StoreData`/`RetrieveData`,
+     `DiskWrite`/`DiskRead` for persistent storage, `GetGlobalRam` to list memory
+     usage and `GetStorage` for disk statistics.
 4. **Handling Disconnection**:
    - If a node disconnects, the master releases the assigned port for future connections and notifies the other node if necessary.
 
