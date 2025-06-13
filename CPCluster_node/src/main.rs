@@ -2,7 +2,9 @@ use cpcluster_common::config::Config;
 use cpcluster_common::{
     is_local_ip, read_length_prefixed, write_length_prefixed, JoinInfo, NodeMessage,
 };
-use cpcluster_node::{disk_store::DiskStore, execute_task, memory_store::MemoryStore};
+use cpcluster_node::{
+    disk_store::DiskStore, execute_task, internet_ports::InternetPorts, memory_store::MemoryStore,
+};
 use log::{error, info, warn};
 use reqwest::Client;
 use rustls_native_certs as native_certs;
@@ -33,6 +35,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             std::path::PathBuf::from(&config.storage_dir),
             config.disk_space_mb,
         ))
+    } else {
+        None
+    };
+    let internet_ports = if config.role == cpcluster_common::NodeRole::Internet {
+        if let Some(ports) = &config.internet_ports {
+            Some(Arc::new(
+                cpcluster_node::internet_ports::InternetPorts::bind(ports).await,
+            ))
+        } else {
+            Some(Arc::new(
+                cpcluster_node::internet_ports::InternetPorts::bind(&[]).await,
+            ))
+        }
     } else {
         None
     };
@@ -131,6 +146,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             let storage = config.storage_dir.clone();
                             let mem = memory.clone();
                             let ds = disk_store.clone();
+                            let internet = internet_ports.clone();
                             tokio::spawn(async move {
                                 if let Err(e) = handle_connection(
                                     target,
@@ -141,6 +157,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                                     &storage,
                                     mem,
                                     ds,
+                                    internet.as_deref(),
                                 ).await {
                                     error!("Direct connection error: {}", e);
                                 }
@@ -156,6 +173,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                                 &config.storage_dir,
                                 &memory,
                                 disk_store.as_ref(),
+                                internet_ports.as_deref(),
                             )
                             .await;
                             let msg = NodeMessage::TaskResult {
@@ -323,6 +341,7 @@ async fn handle_connection(
     storage_dir: &str,
     memory: MemoryStore,
     disk: Option<DiskStore>,
+    internet_ports: Option<&InternetPorts>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let addr = format!("{}:{}", target, port);
     let use_tls = !is_local_ip(&target);
@@ -362,7 +381,15 @@ async fn handle_connection(
             Err(_) => break,
         };
         if let Ok(NodeMessage::AssignTask { id, task }) = serde_json::from_slice(&buf) {
-            let result = execute_task(task, &client, storage_dir, &memory, disk.as_ref()).await;
+            let result = execute_task(
+                task,
+                &client,
+                storage_dir,
+                &memory,
+                disk.as_ref(),
+                internet_ports,
+            )
+            .await;
             let msg = NodeMessage::TaskResult {
                 id: id.clone(),
                 result,

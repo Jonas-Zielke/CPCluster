@@ -3,14 +3,16 @@ use meval::shunting_yard::to_rpn;
 use meval::tokenizer::{tokenize, Operation, Token};
 use num_complex::Complex64;
 pub mod disk_store;
+pub mod internet_ports;
 pub mod memory_store;
 
 use disk_store::DiskStore;
+use internet_ports::InternetPorts;
 use memory_store::MemoryStore;
 use reqwest::Client;
 use std::path::Path;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpStream, UdpSocket};
+use tokio::net::{TcpSocket, TcpStream, UdpSocket};
 
 fn eval_complex(expr: &str) -> Result<Complex64, String> {
     let tokens = tokenize(expr).map_err(|e| e.to_string())?;
@@ -59,6 +61,7 @@ pub async fn execute_task(
     storage_dir: &str,
     store: &MemoryStore,
     disk: Option<&DiskStore>,
+    internet: Option<&InternetPorts>,
 ) -> TaskResult {
     match task {
         Task::Compute { expression } => match meval::eval_str(&expression) {
@@ -72,32 +75,64 @@ pub async fn execute_task(
             },
             Err(e) => TaskResult::Error(e.to_string()),
         },
-        Task::Tcp { addr, data } => match TcpStream::connect(&addr).await {
-            Ok(mut stream) => {
-                if let Err(e) = stream.write_all(&data).await {
-                    return TaskResult::Error(e.to_string());
+        Task::Tcp { addr, data } => {
+            let connect_res = if let Some(inet) = internet.and_then(|i| i.tcp_port()) {
+                let socket = TcpSocket::new_v4().map_err(|e| TaskResult::Error(e.to_string()));
+                match socket {
+                    Ok(s) => {
+                        if s.bind(std::net::SocketAddr::from(([0, 0, 0, 0], inet)))
+                            .is_ok()
+                        {
+                            s.connect(addr.parse().unwrap()).await
+                        } else {
+                            TcpStream::connect(&addr).await
+                        }
+                    }
+                    Err(_) => TcpStream::connect(&addr).await,
                 }
-                let mut buf = vec![0u8; 1024];
-                match stream.read(&mut buf).await {
-                    Ok(n) => TaskResult::Bytes(buf[..n].to_vec()),
-                    Err(e) => TaskResult::Error(e.to_string()),
+            } else {
+                TcpStream::connect(&addr).await
+            };
+            match connect_res {
+                Ok(mut stream) => {
+                    if let Err(e) = stream.write_all(&data).await {
+                        return TaskResult::Error(e.to_string());
+                    }
+                    let mut buf = vec![0u8; 1024];
+                    match stream.read(&mut buf).await {
+                        Ok(n) => TaskResult::Bytes(buf[..n].to_vec()),
+                        Err(e) => TaskResult::Error(e.to_string()),
+                    }
                 }
+                Err(e) => TaskResult::Error(e.to_string()),
             }
-            Err(e) => TaskResult::Error(e.to_string()),
-        },
-        Task::Udp { addr, data } => match UdpSocket::bind("0.0.0.0:0").await {
-            Ok(socket) => {
-                if let Err(e) = socket.send_to(&data, &addr).await {
+        }
+        Task::Udp { addr, data } => {
+            if let Some(sock) = internet.and_then(|i| i.udp_socket()) {
+                if let Err(e) = sock.send_to(&data, &addr).await {
                     return TaskResult::Error(e.to_string());
                 }
                 let mut buf = vec![0u8; 1024];
-                match socket.recv_from(&mut buf).await {
+                match sock.recv_from(&mut buf).await {
                     Ok((n, _)) => TaskResult::Bytes(buf[..n].to_vec()),
                     Err(e) => TaskResult::Error(e.to_string()),
                 }
+            } else {
+                match UdpSocket::bind("0.0.0.0:0").await {
+                    Ok(socket) => {
+                        if let Err(e) = socket.send_to(&data, &addr).await {
+                            return TaskResult::Error(e.to_string());
+                        }
+                        let mut buf = vec![0u8; 1024];
+                        match socket.recv_from(&mut buf).await {
+                            Ok((n, _)) => TaskResult::Bytes(buf[..n].to_vec()),
+                            Err(e) => TaskResult::Error(e.to_string()),
+                        }
+                    }
+                    Err(e) => TaskResult::Error(e.to_string()),
+                }
             }
-            Err(e) => TaskResult::Error(e.to_string()),
-        },
+        }
         Task::ComplexMath { expression } => match eval_complex(&expression) {
             Ok(c) => TaskResult::Response(c.to_string()),
             Err(e) => TaskResult::Error(e),
