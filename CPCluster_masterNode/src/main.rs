@@ -1,5 +1,5 @@
 use cpcluster_common::config::Config;
-use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, Task, TaskResult};
+use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, NodeRole, Task, TaskResult};
 use cpcluster_common::{read_length_prefixed, write_length_prefixed};
 use log::{error, info, warn};
 use rcgen::generate_simple_self_signed;
@@ -94,6 +94,8 @@ struct NodeInfo {
     active_tasks: HashMap<String, Task>,
     #[serde(default)]
     is_worker: bool,
+    #[serde(default)]
+    role: NodeRole,
 }
 
 #[derive(Debug, Clone)]
@@ -353,6 +355,7 @@ where
                 port: None,
                 active_tasks: HashMap::new(),
                 is_worker: false,
+                role: NodeRole::Worker,
             },
         );
         save_state(&master_node).await;
@@ -372,6 +375,14 @@ where
 
             let request: NodeMessage = serde_json::from_slice(&data)?;
             match request {
+                NodeMessage::RegisterRole(role) => {
+                    master_node
+                        .connected_nodes
+                        .lock()
+                        .await
+                        .entry(addr.clone())
+                        .and_modify(|n| n.role = role);
+                }
                 NodeMessage::GetConnectedNodes => {
                     // Sende die Liste aller verbundenen Nodes
                     let connected_nodes = master_node
