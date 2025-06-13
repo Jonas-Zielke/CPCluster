@@ -166,6 +166,15 @@ Worker node using a RAM disk for shared memory between tasks:
 }
 ```
 
+Internet node opening specific ports for network tasks:
+
+```json
+{
+  "role": "Internet",
+  "internet_ports": [8080, 8443]
+}
+```
+
 For additional information on the code layout and contribution hints see
 [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md).
 

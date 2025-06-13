@@ -44,6 +44,7 @@ Important configuration fields include:
 - `storage_dir` – directory used for disk tasks or shared RAM disks.
 - `disk_space_mb` – quota for disk nodes.
 - `failover_timeout_ms` and `master_addresses` – reconnection behaviour.
+- `internet_ports` – list of ports bound by Internet nodes.
 
 `cpcluster_common::Task` includes variants such as `Tcp`, `Udp`, `ComplexMath`, `StoreData`, `RetrieveData`, `DiskWrite` and `DiskRead` in addition to compute and HTTP requests.
 

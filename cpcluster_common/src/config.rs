@@ -12,6 +12,8 @@ pub struct Config {
     pub ca_cert: Option<String>,
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
+    /// Ports bound by Internet nodes for outgoing network requests
+    pub internet_ports: Option<Vec<u16>>,
     /// Directory used for on-disk storage by nodes
     #[serde(default = "default_storage_dir")]
     pub storage_dir: String,
@@ -32,6 +34,7 @@ impl Default for Config {
             ca_cert: None,
             cert_path: None,
             key_path: None,
+            internet_ports: None,
             storage_dir: default_storage_dir(),
             disk_space_mb: default_disk_space(),
             role: NodeRole::Worker,
