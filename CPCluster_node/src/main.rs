@@ -21,6 +21,22 @@ use tokio_rustls::{rustls, TlsConnector};
 trait ReadWrite: AsyncRead + AsyncWrite {}
 impl<T: AsyncRead + AsyncWrite + ?Sized> ReadWrite for T {}
 
+async fn execute_task(task: Task, client: &Client) -> TaskResult {
+    match task {
+        Task::Compute { expression } => match eval_str(&expression) {
+            Ok(v) => TaskResult::Number(v),
+            Err(e) => TaskResult::Error(e.to_string()),
+        },
+        Task::HttpRequest { url } => match client.get(&url).send().await {
+            Ok(resp) => match resp.text().await {
+                Ok(text) => TaskResult::Response(text),
+                Err(e) => TaskResult::Error(e.to_string()),
+            },
+            Err(e) => TaskResult::Error(e.to_string()),
+        },
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     env_logger::init();
@@ -88,6 +104,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     // Periodic heartbeat loop
+    let http_client = Client::new();
     loop {
         if let Err(e) = send_message(&mut stream, NodeMessage::Heartbeat).await {
             warn!("Heartbeat failed: {}", e);
@@ -131,6 +148,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     }
                     NodeMessage::HeartbeatAck => {
                         info!("Received heartbeat acknowledgement from master");
+                    }
+                    NodeMessage::AssignTask { id, task } => {
+                        let result = execute_task(task, &http_client).await;
+                        let msg = NodeMessage::TaskResult {
+                            id: id.clone(),
+                            result,
+                        };
+                        open_tasks.lock().unwrap().push(msg.clone());
+                        if let Err(e) = send_message(&mut stream, msg.clone()).await {
+                            warn!("Failed to send task result: {}", e);
+                        }
+                        open_tasks.lock().unwrap().retain(|m| match m {
+                            NodeMessage::TaskResult { id: rid, .. } => rid != &id,
+                            _ => true,
+                        });
                     }
                     _ => {}
                 }
@@ -318,19 +350,7 @@ async fn handle_connection(
             Err(_) => break,
         };
         if let Ok(NodeMessage::AssignTask { id, task }) = serde_json::from_slice(&buf) {
-            let result = match task {
-                Task::Compute { expression } => match eval_str(&expression) {
-                    Ok(v) => TaskResult::Number(v),
-                    Err(e) => TaskResult::Error(e.to_string()),
-                },
-                Task::HttpRequest { url } => match client.get(&url).send().await {
-                    Ok(resp) => match resp.text().await {
-                        Ok(text) => TaskResult::Response(text),
-                        Err(e) => TaskResult::Error(e.to_string()),
-                    },
-                    Err(e) => TaskResult::Error(e.to_string()),
-                },
-            };
+            let result = execute_task(task, &client).await;
             let msg = NodeMessage::TaskResult {
                 id: id.clone(),
                 result,
