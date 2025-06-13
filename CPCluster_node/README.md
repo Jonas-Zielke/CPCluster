@@ -28,3 +28,19 @@ let request = Task::HttpRequest { url: "https://example.com".into() };
 ```
 
 `TaskResult::Number(3.0)` or `TaskResult::Response` will be returned respectively.
+
+## In-memory Storage
+
+The node exposes a simple volatile key/value store implemented in
+`memory_store.rs`. `MemoryStore` is created in `main` and shared with all task
+handlers. Tasks can store and load binary blobs using `Task::StoreData` and
+`Task::RetrieveData` which internally call `MemoryStore::store` and
+`MemoryStore::load`.
+
+```rust
+use cpcluster_node::memory_store::MemoryStore;
+
+let store = MemoryStore::new();
+store.store("example".into(), b"data".to_vec()).await;
+let data = store.load("example").await;
+```

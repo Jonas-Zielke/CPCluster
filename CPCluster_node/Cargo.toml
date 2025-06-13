@@ -25,7 +25,6 @@ uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.11", features = ["rustls-tls"] }
 meval = "0.2"
 num-complex = "0.4"
-once_cell = "1.17"
 cpcluster_common = { path = "../cpcluster_common" }
 rustls-native-certs = "0.8"
 log = "0.4"

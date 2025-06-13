@@ -2,15 +2,13 @@ use cpcluster_common::{Task, TaskResult};
 use meval::shunting_yard::to_rpn;
 use meval::tokenizer::{tokenize, Operation, Token};
 use num_complex::Complex64;
-use once_cell::sync::Lazy;
+pub mod memory_store;
+
+use memory_store::MemoryStore;
 use reqwest::Client;
-use std::collections::HashMap;
 use std::path::Path;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
-use tokio::sync::Mutex;
-
-static MEMORY: Lazy<Mutex<HashMap<String, Vec<u8>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn eval_complex(expr: &str) -> Result<Complex64, String> {
     let tokens = tokenize(expr).map_err(|e| e.to_string())?;
@@ -53,7 +51,12 @@ fn eval_complex(expr: &str) -> Result<Complex64, String> {
     stack.pop().ok_or("no result".into())
 }
 
-pub async fn execute_task(task: Task, client: &Client, storage_dir: &str) -> TaskResult {
+pub async fn execute_task(
+    task: Task,
+    client: &Client,
+    storage_dir: &str,
+    store: &MemoryStore,
+) -> TaskResult {
     match task {
         Task::Compute { expression } => match meval::eval_str(&expression) {
             Ok(v) => TaskResult::Number(v),
@@ -97,10 +100,10 @@ pub async fn execute_task(task: Task, client: &Client, storage_dir: &str) -> Tas
             Err(e) => TaskResult::Error(e),
         },
         Task::StoreData { key, data } => {
-            MEMORY.lock().await.insert(key, data);
+            store.store(key, data).await;
             TaskResult::Stored
         }
-        Task::RetrieveData { key } => match MEMORY.lock().await.get(&key).cloned() {
+        Task::RetrieveData { key } => match store.load(&key).await {
             Some(d) => TaskResult::Bytes(d),
             None => TaskResult::Error("Key not found".into()),
         },
