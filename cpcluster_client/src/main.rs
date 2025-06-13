@@ -3,8 +3,6 @@ use std::{borrow::Cow, error::Error, fs};
 use tokio::net::TcpStream;
 use uuid::Uuid;
 use tokio::time::{sleep, Duration};
-use serde_json;
-use env_logger;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
