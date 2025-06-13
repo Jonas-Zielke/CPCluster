@@ -9,6 +9,68 @@ use tokio::net::TcpStream;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
+async fn submit_and_wait(
+    stream: &mut TcpStream,
+    task: Task,
+) -> Result<TaskResult, Box<dyn Error + Send + Sync>> {
+    let id = Uuid::new_v4().to_string();
+    let msg = NodeMessage::SubmitTask {
+        id: id.clone(),
+        task,
+    };
+    write_length_prefixed(stream, &serde_json::to_vec(&msg)?).await?;
+    let _ = read_length_prefixed(stream).await?; // TaskAccepted
+    loop {
+        let req = NodeMessage::GetTaskResult(id.clone());
+        write_length_prefixed(stream, &serde_json::to_vec(&req)?).await?;
+        let buf = read_length_prefixed(stream).await?;
+        match serde_json::from_slice::<NodeMessage>(&buf)? {
+            NodeMessage::TaskResult { result, .. } => return Ok(result),
+            _ => sleep(Duration::from_millis(500)).await,
+        }
+    }
+}
+
+async fn run_data_tests(stream: &mut TcpStream) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let compute_res = submit_and_wait(
+        stream,
+        Task::Compute {
+            expression: Cow::Borrowed("1+1"),
+        },
+    )
+    .await?;
+
+    let number = match compute_res {
+        TaskResult::Number(v) => v,
+        _ => return Ok(()),
+    };
+
+    let mem_id = Uuid::new_v4().to_string();
+    let _ = submit_and_wait(
+        stream,
+        Task::StoreData {
+            key: mem_id.clone(),
+            data: number.to_string().into_bytes(),
+        },
+    )
+    .await?;
+
+    let disk_id = format!("{}.txt", Uuid::new_v4());
+    let content = format!("{}:{}", mem_id, number);
+    let _ = submit_and_wait(
+        stream,
+        Task::DiskWrite {
+            path: disk_id.clone(),
+            data: content.into_bytes(),
+        },
+    )
+    .await?;
+
+    println!("RAM ID: {}", mem_id);
+    println!("Storage ID: {}", disk_id);
+    Ok(())
+}
+
 async fn execute_task(task: Task, client: &Client) -> TaskResult {
     match task {
         Task::Compute { expression } => match eval_str(&expression) {
@@ -109,12 +171,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                         match serde_json::from_slice::<NodeMessage>(&buf2)? {
                             NodeMessage::TaskResult { result: r, .. } => {
                                 info!("chained result: {:?}", r);
+                                run_data_tests(&mut stream).await?;
                                 return Ok(());
                             }
                             _ => sleep(Duration::from_millis(500)).await,
                         }
                     }
                 } else {
+                    run_data_tests(&mut stream).await?;
                     return Ok(());
                 }
             }
