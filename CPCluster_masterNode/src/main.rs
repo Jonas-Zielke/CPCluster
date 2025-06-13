@@ -179,7 +179,7 @@ fn run_shell(master: Arc<MasterNode>) {
                     }
                 }
                 cmd if cmd.trim_start().starts_with("task") => {
-                    let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
+                    let parts: Vec<&str> = cmd.split_whitespace().collect();
                     if parts.len() != 2 {
                         println!("Usage: task <id>");
                     } else {
@@ -203,7 +203,7 @@ fn run_shell(master: Arc<MasterNode>) {
                     }
                 }
                 cmd if cmd.trim_start().starts_with("addtask") => {
-                    let parts: Vec<&str> = cmd.trim().splitn(3, ' ').collect();
+                    let parts: Vec<&str> = cmd.splitn(3, ' ').collect();
                     if parts.len() < 3 {
                         println!("Usage: addtask compute <expression> | addtask http <url>");
                     } else {
@@ -234,7 +234,7 @@ fn run_shell(master: Arc<MasterNode>) {
                     exit_shell = true;
                     break;
                 }
-                cmd if cmd.is_empty() => {}
+                "" => {}
                 _ => println!("Unknown command"),
             }
             if exit_shell {
@@ -258,7 +258,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let token = generate_token();
     let addr = config
         .master_addresses
-        .get(0)
+        .first()
         .cloned()
         .unwrap_or_else(|| "127.0.0.1:55000".to_string());
     let mut parts = addr.split(':');
