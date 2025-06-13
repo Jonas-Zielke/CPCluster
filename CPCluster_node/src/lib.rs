@@ -147,19 +147,27 @@ pub async fn execute_task(
         }
         Task::GetGlobalRam => {
             let stats = store.stats().await;
-            let mut resp = String::new();
-            for (id, size) in stats {
-                resp.push_str(&format!("{}: {} bytes\n", id, size));
+            if stats.is_empty() {
+                TaskResult::Response("No entries found\n".to_string())
+            } else {
+                let mut resp = String::new();
+                for (id, size) in stats {
+                    resp.push_str(&format!("{}: {} bytes\n", id, size));
+                }
+                TaskResult::Response(resp)
             }
-            TaskResult::Response(resp)
         }
         Task::GetStorage => {
             if let Some(ds) = disk {
                 match ds.stats().await {
                     Ok((files, free)) => {
                         let mut resp = format!("free: {} bytes\n", free);
-                        for (id, size) in files {
-                            resp.push_str(&format!("{}: {} bytes\n", id, size));
+                        if files.is_empty() {
+                            resp.push_str("No entries found\n");
+                        } else {
+                            for (id, size) in files {
+                                resp.push_str(&format!("{}: {} bytes\n", id, size));
+                            }
                         }
                         TaskResult::Response(resp)
                     }
