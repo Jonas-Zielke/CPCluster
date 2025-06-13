@@ -17,12 +17,22 @@ pub struct JoinInfo {
 pub enum Task {
     Compute { expression: Cow<'static, str> },
     HttpRequest { url: String },
+    Tcp { addr: String, data: Vec<u8> },
+    Udp { addr: String, data: Vec<u8> },
+    ComplexMath { expression: Cow<'static, str> },
+    StoreData { key: String, data: Vec<u8> },
+    RetrieveData { key: String },
+    DiskWrite { path: String, data: Vec<u8> },
+    DiskRead { path: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum TaskResult {
     Number(f64),
     Response(String),
+    Bytes(Vec<u8>),
+    Stored,
+    Written,
     Error(String),
 }
 
