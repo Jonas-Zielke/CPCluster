@@ -23,15 +23,41 @@ pub struct JoinInfo {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Task {
-    Compute { expression: Cow<'static, str> },
-    HttpRequest { url: String },
-    Tcp { addr: String, data: Vec<u8> },
-    Udp { addr: String, data: Vec<u8> },
-    ComplexMath { expression: Cow<'static, str> },
-    StoreData { key: String, data: Vec<u8> },
-    RetrieveData { key: String },
-    DiskWrite { path: String, data: Vec<u8> },
-    DiskRead { path: String },
+    Compute {
+        expression: Cow<'static, str>,
+    },
+    HttpRequest {
+        url: String,
+    },
+    Tcp {
+        addr: String,
+        data: Vec<u8>,
+    },
+    Udp {
+        addr: String,
+        data: Vec<u8>,
+    },
+    ComplexMath {
+        expression: Cow<'static, str>,
+    },
+    StoreData {
+        key: String,
+        data: Vec<u8>,
+    },
+    RetrieveData {
+        key: String,
+    },
+    DiskWrite {
+        path: String,
+        data: Vec<u8>,
+    },
+    DiskRead {
+        path: String,
+    },
+    /// Return a list of all in-memory IDs with their size in bytes
+    GetGlobalRam,
+    /// Return disk usage statistics and file sizes for stored data
+    GetStorage,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
