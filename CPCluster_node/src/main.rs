@@ -387,7 +387,7 @@ async fn handle_connection(
                 storage_dir,
                 &memory,
                 disk.as_ref(),
-                internet_ports.as_deref(),
+                internet_ports,
             )
             .await;
             let msg = NodeMessage::TaskResult {
