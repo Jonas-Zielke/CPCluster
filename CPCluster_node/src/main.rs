@@ -7,7 +7,7 @@ use log::{error, info, warn};
 use meval::eval_str;
 use reqwest::Client;
 use rustls_native_certs as native_certs;
-use std::{error::Error, fs, sync::Arc};
+use std::{collections::HashMap, error::Error, fs, sync::Arc};
 use tokio::sync::Mutex;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = Config::load("config.json").unwrap_or_default();
 
     let mut stream: Option<Box<dyn ReadWrite + Unpin + Send>> = None;
-    let open_tasks: Arc<Mutex<Vec<NodeMessage>>> = Arc::new(Mutex::new(Vec::new()));
+    let open_tasks: Arc<Mutex<HashMap<String, NodeMessage>>> = Arc::new(Mutex::new(HashMap::new()));
     for addr in &config.master_addresses {
         match connect(
             addr,
@@ -100,73 +100,71 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
 
-    // Periodic heartbeat loop
+    // Heartbeat and message loop
     let http_client = Client::new();
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(
+        config.failover_timeout_ms / 2,
+    ));
     loop {
-        if let Err(e) = send_message(&mut stream, NodeMessage::Heartbeat).await {
-            warn!("Heartbeat failed: {}", e);
-            match reconnect(&join_info, &config, &open_tasks).await {
-                Ok(s) => {
-                    stream = s;
-                    continue;
-                }
-                Err(err) => {
-                    error!("Reconnect failed: {}", err);
-                    break;
+        tokio::select! {
+            _ = interval.tick() => {
+                if let Err(e) = send_message(&mut stream, NodeMessage::Heartbeat).await {
+                    warn!("Heartbeat failed: {}", e);
+                    match reconnect(&join_info, &config, &open_tasks).await {
+                        Ok(s) => { stream = s; continue; }
+                        Err(err) => { error!("Reconnect failed: {}", err); break; }
+                    }
                 }
             }
-        }
-
-        if let Ok(Ok(buf)) = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            read_length_prefixed(&mut stream),
-        )
-        .await
-        {
-            if let Ok(msg) = serde_json::from_slice::<NodeMessage>(&buf) {
-                match msg {
-                    NodeMessage::ConnectionInfo(target, port) => {
-                        let tasks = open_tasks.clone();
-                        let ca_path = config.ca_cert_path.clone();
-                        let ca_cert = config.ca_cert.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = handle_connection(
-                                target,
-                                port,
-                                tasks,
-                                ca_path.as_deref(),
-                                ca_cert.as_deref(),
-                            )
-                            .await
-                            {
-                                error!("Direct connection error: {}", e);
-                            }
-                        });
-                    }
-                    NodeMessage::HeartbeatAck => {
-                        info!("Received heartbeat acknowledgement from master");
-                    }
-                    NodeMessage::AssignTask { id, task } => {
-                        let result = execute_task(task, &http_client).await;
-                        let msg = NodeMessage::TaskResult {
-                            id: id.clone(),
-                            result,
-                        };
-                        open_tasks.lock().await.push(msg.clone());
-                        if let Err(e) = send_message(&mut stream, msg.clone()).await {
-                            warn!("Failed to send task result: {}", e);
+            res = read_length_prefixed(&mut stream) => {
+                let buf = match res {
+                    Ok(b) => b,
+                    Err(e) => {
+                        warn!("Read failed: {}", e);
+                        match reconnect(&join_info, &config, &open_tasks).await {
+                            Ok(s) => { stream = s; continue; }
+                            Err(err) => { error!("Reconnect failed: {}", err); break; }
                         }
-                        open_tasks.lock().await.retain(|m| match m {
-                            NodeMessage::TaskResult { id: rid, .. } => rid != &id,
-                            _ => true,
-                        });
                     }
-                    _ => {}
+                };
+                if let Ok(msg) = serde_json::from_slice::<NodeMessage>(&buf) {
+                    match msg {
+                        NodeMessage::ConnectionInfo(target, port) => {
+                            let tasks = open_tasks.clone();
+                            let ca_path = config.ca_cert_path.clone();
+                            let ca_cert = config.ca_cert.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = handle_connection(
+                                    target,
+                                    port,
+                                    tasks,
+                                    ca_path.as_deref(),
+                                    ca_cert.as_deref(),
+                                ).await {
+                                    error!("Direct connection error: {}", e);
+                                }
+                            });
+                        }
+                        NodeMessage::HeartbeatAck => {
+                            info!("Received heartbeat acknowledgement from master");
+                        }
+                        NodeMessage::AssignTask { id, task } => {
+                            let result = execute_task(task, &http_client).await;
+                            let msg = NodeMessage::TaskResult {
+                                id: id.clone(),
+                                result,
+                            };
+                            open_tasks.lock().await.insert(id.clone(), msg.clone());
+                            if let Err(e) = send_message(&mut stream, msg.clone()).await {
+                                warn!("Failed to send task result: {}", e);
+                            }
+                            open_tasks.lock().await.remove(&id);
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
-
-        tokio::time::sleep(std::time::Duration::from_millis(config.failover_timeout_ms)).await;
     }
 
     // Attempt graceful disconnect if still connected
@@ -253,7 +251,7 @@ fn build_tls_config(
 async fn reconnect(
     join_info: &JoinInfo,
     config: &Config,
-    open_tasks: &Arc<Mutex<Vec<NodeMessage>>>,
+    open_tasks: &Arc<Mutex<HashMap<String, NodeMessage>>>,
 ) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
     for addr in &config.master_addresses {
         match connect(
@@ -288,7 +286,7 @@ async fn reconnect(
 
                 // resend open tasks
                 let tasks = open_tasks.lock().await.clone();
-                for task in tasks {
+                for task in tasks.values() {
                     if let Err(e) = send_message(&mut s, task.clone()).await {
                         warn!("Failed to resend task: {}", e);
                     }
@@ -310,7 +308,7 @@ async fn reconnect(
 async fn handle_connection(
     target: String,
     port: u16,
-    tasks: Arc<Mutex<Vec<NodeMessage>>>,
+    tasks: Arc<Mutex<HashMap<String, NodeMessage>>>,
     ca_path: Option<&str>,
     ca_cert: Option<&str>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -357,12 +355,9 @@ async fn handle_connection(
                 id: id.clone(),
                 result,
             };
-            tasks.lock().await.push(msg.clone());
+            tasks.lock().await.insert(id.clone(), msg.clone());
             send_message(&mut stream, msg.clone()).await?;
-            tasks.lock().await.retain(|m| match m {
-                NodeMessage::TaskResult { id: rid, .. } => rid != &id,
-                _ => true,
-            });
+            tasks.lock().await.remove(&id);
         }
     }
     Ok(())
