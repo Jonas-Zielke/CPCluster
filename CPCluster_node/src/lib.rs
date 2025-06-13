@@ -145,5 +145,29 @@ pub async fn execute_task(
                 Err(e) => TaskResult::Error(e.to_string()),
             }
         }
+        Task::GetGlobalRam => {
+            let stats = store.stats().await;
+            let mut resp = String::new();
+            for (id, size) in stats {
+                resp.push_str(&format!("{}: {} bytes\n", id, size));
+            }
+            TaskResult::Response(resp)
+        }
+        Task::GetStorage => {
+            if let Some(ds) = disk {
+                match ds.stats().await {
+                    Ok((files, free)) => {
+                        let mut resp = format!("free: {} bytes\n", free);
+                        for (id, size) in files {
+                            resp.push_str(&format!("{}: {} bytes\n", id, size));
+                        }
+                        TaskResult::Response(resp)
+                    }
+                    Err(e) => TaskResult::Error(e.to_string()),
+                }
+            } else {
+                TaskResult::Error("No disk store configured".into())
+            }
+        }
     }
 }
