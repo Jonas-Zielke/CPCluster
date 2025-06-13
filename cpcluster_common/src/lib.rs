@@ -15,8 +15,12 @@ pub struct JoinInfo {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Task {
-    Compute { expression: Cow<'static, str> },
-    HttpRequest { url: String },
+    Compute {
+        expression: Cow<'static, str>,
+    },
+    HttpRequest {
+        url: String,
+    },
     /// Send data over a TCP connection and return the response bytes.
     TcpIo {
         addr: String,
@@ -30,15 +34,27 @@ pub enum Task {
         data: Vec<u8>,
     },
     /// Perform a complex mathematical computation.
-    ComplexMath { expression: Cow<'static, str> },
+    ComplexMath {
+        expression: Cow<'static, str>,
+    },
     /// Store arbitrary bytes in memory under the given key.
-    StoreData { key: String, data: Vec<u8> },
+    StoreData {
+        key: String,
+        data: Vec<u8>,
+    },
     /// Retrieve previously stored data by key.
-    RetrieveData { key: String },
+    RetrieveData {
+        key: String,
+    },
     /// Write bytes to disk at the given path.
-    DiskWrite { path: String, data: Vec<u8> },
+    DiskWrite {
+        path: String,
+        data: Vec<u8>,
+    },
     /// Read bytes from disk at the given path.
-    DiskRead { path: String },
+    DiskRead {
+        path: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

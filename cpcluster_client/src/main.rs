@@ -6,16 +6,11 @@ use meval::eval_str;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use std::{
-    borrow::Cow,
-    collections::HashMap,
-    error::Error,
-    fs,
-    sync::Mutex as StdMutex,
-    time::Duration,
+    borrow::Cow, collections::HashMap, error::Error, fs, sync::Mutex as StdMutex, time::Duration,
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::time::{sleep, timeout};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
 static DATA_STORE: Lazy<StdMutex<HashMap<String, Vec<u8>>>> =
@@ -34,39 +29,35 @@ async fn execute_task(task: Task, client: &Client) -> TaskResult {
             },
             Err(e) => TaskResult::Error(e.to_string()),
         },
-        Task::TcpIo { addr, port, data } => {
-            match TcpStream::connect((addr.as_str(), port)).await {
-                Ok(mut stream) => {
-                    if let Err(e) = stream.write_all(&data).await {
-                        return TaskResult::Error(e.to_string());
-                    }
-                    let mut buf = Vec::new();
-                    match stream.read_to_end(&mut buf).await {
-                        Ok(_) => TaskResult::Bytes(buf),
-                        Err(e) => TaskResult::Error(e.to_string()),
-                    }
+        Task::TcpIo { addr, port, data } => match TcpStream::connect((addr.as_str(), port)).await {
+            Ok(mut stream) => {
+                if let Err(e) = stream.write_all(&data).await {
+                    return TaskResult::Error(e.to_string());
                 }
-                Err(e) => TaskResult::Error(e.to_string()),
-            }
-        }
-        Task::UdpIo { addr, port, data } => {
-            match UdpSocket::bind("0.0.0.0:0").await {
-                Ok(socket) => {
-                    if let Err(e) = socket.send_to(&data, (addr.as_str(), port)).await {
-                        return TaskResult::Error(e.to_string());
-                    }
-                    let mut buf = vec![0u8; 65535];
-                    match timeout(Duration::from_secs(1), socket.recv_from(&mut buf)).await {
-                        Ok(Ok((len, _))) => {
-                            buf.truncate(len);
-                            TaskResult::Bytes(buf)
-                        }
-                        _ => TaskResult::Bytes(Vec::new()),
-                    }
+                let mut buf = Vec::new();
+                match stream.read_to_end(&mut buf).await {
+                    Ok(_) => TaskResult::Bytes(buf),
+                    Err(e) => TaskResult::Error(e.to_string()),
                 }
-                Err(e) => TaskResult::Error(e.to_string()),
             }
-        }
+            Err(e) => TaskResult::Error(e.to_string()),
+        },
+        Task::UdpIo { addr, port, data } => match UdpSocket::bind("0.0.0.0:0").await {
+            Ok(socket) => {
+                if let Err(e) = socket.send_to(&data, (addr.as_str(), port)).await {
+                    return TaskResult::Error(e.to_string());
+                }
+                let mut buf = vec![0u8; 65535];
+                match timeout(Duration::from_secs(1), socket.recv_from(&mut buf)).await {
+                    Ok(Ok((len, _))) => {
+                        buf.truncate(len);
+                        TaskResult::Bytes(buf)
+                    }
+                    _ => TaskResult::Bytes(Vec::new()),
+                }
+            }
+            Err(e) => TaskResult::Error(e.to_string()),
+        },
         Task::ComplexMath { expression } => match eval_str(&expression) {
             Ok(v) => TaskResult::Number(v),
             Err(e) => TaskResult::Error(e.to_string()),
@@ -83,18 +74,14 @@ async fn execute_task(task: Task, client: &Client) -> TaskResult {
                 None => TaskResult::Error("Key not found".into()),
             }
         }
-        Task::DiskWrite { path, data } => {
-            match tokio::fs::write(&path, data).await {
-                Ok(_) => TaskResult::Stored,
-                Err(e) => TaskResult::Error(e.to_string()),
-            }
-        }
-        Task::DiskRead { path } => {
-            match tokio::fs::read(&path).await {
-                Ok(d) => TaskResult::Bytes(d),
-                Err(e) => TaskResult::Error(e.to_string()),
-            }
-        }
+        Task::DiskWrite { path, data } => match tokio::fs::write(&path, data).await {
+            Ok(_) => TaskResult::Stored,
+            Err(e) => TaskResult::Error(e.to_string()),
+        },
+        Task::DiskRead { path } => match tokio::fs::read(&path).await {
+            Ok(d) => TaskResult::Bytes(d),
+            Err(e) => TaskResult::Error(e.to_string()),
+        },
     }
 }
 
