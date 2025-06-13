@@ -7,4 +7,5 @@
   "ca_cert": null,
   "cert_path": null,
   "key_path": null
+  ,"storage_dir": "storage"
 }
