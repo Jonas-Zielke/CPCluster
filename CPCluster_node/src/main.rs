@@ -1,10 +1,9 @@
 use cpcluster_common::config::Config;
 use cpcluster_common::{
-    is_local_ip, read_length_prefixed, write_length_prefixed, JoinInfo, NodeMessage, Task,
-    TaskResult,
+    is_local_ip, read_length_prefixed, write_length_prefixed, JoinInfo, NodeMessage,
 };
+use cpcluster_node::execute_task;
 use log::{error, info, warn};
-use meval::eval_str;
 use reqwest::Client;
 use rustls_native_certs as native_certs;
 use std::{collections::HashMap, error::Error, fs, sync::Arc};
@@ -17,23 +16,6 @@ use tokio_rustls::{rustls, TlsConnector};
 
 trait ReadWrite: AsyncRead + AsyncWrite {}
 impl<T: AsyncRead + AsyncWrite + ?Sized> ReadWrite for T {}
-
-async fn execute_task(task: Task, client: &Client) -> TaskResult {
-    match task {
-        Task::Compute { expression } => match eval_str(&expression) {
-            Ok(v) => TaskResult::Number(v),
-            Err(e) => TaskResult::Error(e.to_string()),
-        },
-        Task::HttpRequest { url } => match client.get(&url).send().await {
-            Ok(resp) => match resp.text().await {
-                Ok(text) => TaskResult::Response(text),
-                Err(e) => TaskResult::Error(e.to_string()),
-            },
-            Err(e) => TaskResult::Error(e.to_string()),
-        },
-        _ => TaskResult::Error("Unsupported task".into()),
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -134,6 +116,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             let tasks = open_tasks.clone();
                             let ca_path = config.ca_cert_path.clone();
                             let ca_cert = config.ca_cert.clone();
+                            let storage = config.storage_dir.clone();
                             tokio::spawn(async move {
                                 if let Err(e) = handle_connection(
                                     target,
@@ -141,6 +124,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                                     tasks,
                                     ca_path.as_deref(),
                                     ca_cert.as_deref(),
+                                    &storage,
                                 ).await {
                                     error!("Direct connection error: {}", e);
                                 }
@@ -150,7 +134,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             info!("Received heartbeat acknowledgement from master");
                         }
                         NodeMessage::AssignTask { id, task } => {
-                            let result = execute_task(task, &http_client).await;
+                            let result = execute_task(task, &http_client, &config.storage_dir).await;
                             let msg = NodeMessage::TaskResult {
                                 id: id.clone(),
                                 result,
@@ -312,6 +296,7 @@ async fn handle_connection(
     tasks: Arc<Mutex<HashMap<String, NodeMessage>>>,
     ca_path: Option<&str>,
     ca_cert: Option<&str>,
+    storage_dir: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let addr = format!("{}:{}", target, port);
     let use_tls = !is_local_ip(&target);
@@ -351,7 +336,7 @@ async fn handle_connection(
             Err(_) => break,
         };
         if let Ok(NodeMessage::AssignTask { id, task }) = serde_json::from_slice(&buf) {
-            let result = execute_task(task, &client).await;
+            let result = execute_task(task, &client, storage_dir).await;
             let msg = NodeMessage::TaskResult {
                 id: id.clone(),
                 result,

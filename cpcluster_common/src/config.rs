@@ -11,6 +11,9 @@ pub struct Config {
     pub ca_cert: Option<String>,
     pub cert_path: Option<String>,
     pub key_path: Option<String>,
+    /// Directory used for on-disk storage by nodes
+    #[serde(default = "default_storage_dir")]
+    pub storage_dir: String,
 }
 
 impl Default for Config {
@@ -24,6 +27,7 @@ impl Default for Config {
             ca_cert: None,
             cert_path: None,
             key_path: None,
+            storage_dir: default_storage_dir(),
         }
     }
 }
@@ -41,4 +45,8 @@ impl Config {
         fs::write(path, data)?;
         Ok(())
     }
+}
+
+fn default_storage_dir() -> String {
+    "storage".to_string()
 }
