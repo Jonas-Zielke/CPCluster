@@ -555,7 +555,7 @@ fn release_port(master_node: &MasterNode, addr: String) {
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_else(|_| Duration::from_secs(0))
         .as_millis() as u64
 }
 
