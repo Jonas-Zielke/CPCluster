@@ -19,6 +19,7 @@ jobs:
         project:
           - CPCluster_masterNode
           - CPCluster_node
+          - cpcluster_common
 
     steps:
     - uses: actions/checkout@v4
