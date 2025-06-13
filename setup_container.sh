@@ -37,8 +37,8 @@ else
     echo "Rust is already installed"
 fi
 
-# Build master and node crates
-for dir in CPCluster_masterNode CPCluster_node; do
+# Build all crates so they are ready for use
+for dir in cpcluster_common cpcluster_client CPCluster_masterNode CPCluster_node; do
     echo "Building $dir..."
     (cd "$dir" && cargo build --release)
     echo "Finished building $dir"
