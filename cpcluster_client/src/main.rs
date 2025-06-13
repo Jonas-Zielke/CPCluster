@@ -1,35 +1,13 @@
+use cpcluster_client::{execute_task, submit_and_wait};
 use cpcluster_common::{
     JoinInfo, NodeMessage, Task, TaskResult, read_length_prefixed, write_length_prefixed,
 };
 use log::info;
-use meval::eval_str;
 use reqwest::Client;
 use std::{borrow::Cow, error::Error, fs};
 use tokio::net::TcpStream;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
-
-async fn submit_and_wait(
-    stream: &mut TcpStream,
-    task: Task,
-) -> Result<TaskResult, Box<dyn Error + Send + Sync>> {
-    let id = Uuid::new_v4().to_string();
-    let msg = NodeMessage::SubmitTask {
-        id: id.clone(),
-        task,
-    };
-    write_length_prefixed(stream, &serde_json::to_vec(&msg)?).await?;
-    let _ = read_length_prefixed(stream).await?; // TaskAccepted
-    loop {
-        let req = NodeMessage::GetTaskResult(id.clone());
-        write_length_prefixed(stream, &serde_json::to_vec(&req)?).await?;
-        let buf = read_length_prefixed(stream).await?;
-        match serde_json::from_slice::<NodeMessage>(&buf)? {
-            NodeMessage::TaskResult { result, .. } => return Ok(result),
-            _ => sleep(Duration::from_millis(500)).await,
-        }
-    }
-}
 
 async fn run_data_tests(stream: &mut TcpStream) -> Result<(), Box<dyn Error + Send + Sync>> {
     let compute_res = submit_and_wait(
@@ -69,23 +47,6 @@ async fn run_data_tests(stream: &mut TcpStream) -> Result<(), Box<dyn Error + Se
     println!("RAM ID: {}", mem_id);
     println!("Storage ID: {}", disk_id);
     Ok(())
-}
-
-async fn execute_task(task: Task, client: &Client) -> TaskResult {
-    match task {
-        Task::Compute { expression } => match eval_str(&expression) {
-            Ok(v) => TaskResult::Number(v),
-            Err(e) => TaskResult::Error(e.to_string()),
-        },
-        Task::HttpRequest { url } => match client.get(&url).send().await {
-            Ok(resp) => match resp.text().await {
-                Ok(text) => TaskResult::Response(text),
-                Err(e) => TaskResult::Error(e.to_string()),
-            },
-            Err(e) => TaskResult::Error(e.to_string()),
-        },
-        _ => TaskResult::Error("Unsupported task".into()),
-    }
 }
 
 #[tokio::main]
