@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fs};
+use crate::NodeRole;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
@@ -14,6 +15,10 @@ pub struct Config {
     /// Directory used for on-disk storage by nodes
     #[serde(default = "default_storage_dir")]
     pub storage_dir: String,
+    #[serde(default = "default_disk_space")]
+    pub disk_space_mb: u64,
+    #[serde(default)]
+    pub role: NodeRole,
 }
 
 impl Default for Config {
@@ -28,6 +33,8 @@ impl Default for Config {
             cert_path: None,
             key_path: None,
             storage_dir: default_storage_dir(),
+            disk_space_mb: default_disk_space(),
+            role: NodeRole::Worker,
         }
     }
 }
@@ -49,4 +56,8 @@ impl Config {
 
 fn default_storage_dir() -> String {
     "storage".to_string()
+}
+
+fn default_disk_space() -> u64 {
+    1024
 }

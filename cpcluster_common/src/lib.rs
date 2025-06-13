@@ -4,6 +4,19 @@ use std::borrow::Cow;
 pub mod config;
 pub use config::Config;
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum NodeRole {
+    Worker,
+    Disk,
+    Internet,
+}
+
+impl Default for NodeRole {
+    fn default() -> Self {
+        NodeRole::Worker
+    }
+}
+
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 #[derive(Serialize, Deserialize)]
@@ -51,6 +64,7 @@ pub enum NodeMessage {
     TaskResult { id: String, result: TaskResult },
     TaskAccepted(String),
     DirectMessage(String),
+    RegisterRole(NodeRole),
 }
 
 /// Write a length-prefixed binary message to the provided async writer.

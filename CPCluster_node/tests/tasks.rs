@@ -26,6 +26,7 @@ async fn tcp_and_udp_tasks() {
         &client,
         "./",
         &store,
+        None,
     )
     .await;
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"world"));
@@ -47,6 +48,7 @@ async fn tcp_and_udp_tasks() {
         &client,
         "./",
         &store,
+        None,
     )
     .await;
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"pong"));
@@ -64,6 +66,7 @@ async fn complex_and_storage_tasks() {
         &client,
         "./",
         &store,
+        None,
     )
     .await;
     assert!(matches!(res, TaskResult::Response(ref s) if s.trim() == "4-2i"));
@@ -77,6 +80,7 @@ async fn complex_and_storage_tasks() {
         &client,
         "./",
         &store,
+        None,
     )
     .await;
     assert!(matches!(res, TaskResult::Stored));
@@ -85,6 +89,7 @@ async fn complex_and_storage_tasks() {
         &client,
         "./",
         &store,
+        None,
     )
     .await;
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"data"));
@@ -104,6 +109,7 @@ async fn disk_tasks() {
         &client,
         path,
         &store,
+        None,
     )
     .await;
     assert!(matches!(res, TaskResult::Written));
@@ -114,6 +120,7 @@ async fn disk_tasks() {
         &client,
         path,
         &store,
+        None,
     )
     .await;
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"d"));

@@ -3,8 +3,10 @@ use meval::shunting_yard::to_rpn;
 use meval::tokenizer::{tokenize, Operation, Token};
 use num_complex::Complex64;
 pub mod memory_store;
+pub mod disk_store;
 
 use memory_store::MemoryStore;
+use disk_store::DiskStore;
 use reqwest::Client;
 use std::path::Path;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -56,6 +58,7 @@ pub async fn execute_task(
     client: &Client,
     storage_dir: &str,
     store: &MemoryStore,
+    disk: Option<&DiskStore>,
 ) -> TaskResult {
     match task {
         Task::Compute { expression } => match meval::eval_str(&expression) {
@@ -100,13 +103,29 @@ pub async fn execute_task(
             Err(e) => TaskResult::Error(e),
         },
         Task::StoreData { key, data } => {
-            store.store(key, data).await;
-            TaskResult::Stored
+            if let Some(ds) = disk {
+                match ds.store(key, data).await {
+                    Ok(_) => TaskResult::Stored,
+                    Err(e) => TaskResult::Error(e.to_string()),
+                }
+            } else {
+                store.store(key, data).await;
+                TaskResult::Stored
+            }
         }
-        Task::RetrieveData { key } => match store.load(&key).await {
-            Some(d) => TaskResult::Bytes(d),
-            None => TaskResult::Error("Key not found".into()),
-        },
+        Task::RetrieveData { key } => {
+            if let Some(ds) = disk {
+                match ds.load(&key).await {
+                    Some(d) => TaskResult::Bytes(d),
+                    None => TaskResult::Error("Key not found".into()),
+                }
+            } else {
+                match store.load(&key).await {
+                    Some(d) => TaskResult::Bytes(d),
+                    None => TaskResult::Error("Key not found".into()),
+                }
+            }
+        }
         Task::DiskWrite { path, data } => {
             let full = Path::new(storage_dir).join(&path);
             if let Some(parent) = full.parent() {
