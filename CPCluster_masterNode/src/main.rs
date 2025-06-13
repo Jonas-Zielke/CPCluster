@@ -24,6 +24,11 @@ async fn send_pending_tasks<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    if let Some(node) = master.connected_nodes.lock().unwrap().get(addr) {
+        if !node.is_worker {
+            return Ok(());
+        }
+    }
     loop {
         let next_task = {
             let mut pending = master.pending_tasks.lock().unwrap();
@@ -86,6 +91,8 @@ struct NodeInfo {
     last_heartbeat: u64,
     port: Option<u16>,
     active_tasks: HashMap<String, Task>,
+    #[serde(default)]
+    is_worker: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +118,7 @@ fn assign_tasks_to_nodes(master: &MasterNode) {
         return;
     }
     let mut nodes = master.connected_nodes.lock().unwrap();
+    nodes.retain(|_, n| n.is_worker);
     if nodes.is_empty() {
         return;
     }
@@ -210,7 +218,7 @@ fn run_shell(master: Arc<MasterNode>) {
                         let id = uuid::Uuid::new_v4().to_string();
                         let task = match parts[1] {
                             "compute" => Task::Compute {
-                                expression: parts[2].to_string(),
+                                expression: parts[2].to_string().into(),
                             },
                             "http" => Task::HttpRequest {
                                 url: parts[2].to_string(),
@@ -368,6 +376,7 @@ where
                 last_heartbeat: now_ms(),
                 port: None,
                 active_tasks: HashMap::new(),
+                is_worker: false,
             },
         );
         save_state(&master_node);
@@ -433,6 +442,33 @@ where
                         warn!("No ports available");
                     }
                 }
+                NodeMessage::SubmitTask { id, task } => {
+                    master_node
+                        .pending_tasks
+                        .lock()
+                        .unwrap()
+                        .insert(id.clone(), task);
+                    save_state(&master_node);
+                    let ack = serde_json::to_vec(&NodeMessage::TaskAccepted(id))?;
+                    write_length_prefixed(&mut socket, &ack).await?;
+                }
+                NodeMessage::GetTaskResult(id) => {
+                    let result_opt = master_node
+                        .completed_tasks
+                        .lock()
+                        .unwrap()
+                        .get(&id)
+                        .cloned();
+                    if let Some(result) = result_opt {
+                        let resp = NodeMessage::TaskResult { id, result };
+                        let data = serde_json::to_vec(&resp)?;
+                        write_length_prefixed(&mut socket, &data).await?;
+                    } else {
+                        let resp = NodeMessage::DirectMessage("Pending".into());
+                        let data = serde_json::to_vec(&resp)?;
+                        write_length_prefixed(&mut socket, &data).await?;
+                    }
+                }
                 NodeMessage::Disconnect => {
                     // Entferne die Node und gebe den Port frei
                     info!("Node disconnected and port released.");
@@ -447,7 +483,10 @@ where
                         .lock()
                         .unwrap()
                         .entry(addr.clone())
-                        .and_modify(|n| n.last_heartbeat = now_ms());
+                        .and_modify(|n| {
+                            n.last_heartbeat = now_ms();
+                            n.is_worker = true;
+                        });
                     let ack = serde_json::to_vec(&NodeMessage::HeartbeatAck)?;
                     write_length_prefixed(&mut socket, &ack).await?;
                     info!("Heartbeat received from {}", addr);

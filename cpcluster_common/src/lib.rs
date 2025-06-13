@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 pub mod config;
 pub use config::Config;
@@ -14,7 +15,7 @@ pub struct JoinInfo {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Task {
-    Compute { expression: String },
+    Compute { expression: Cow<'static, str> },
     HttpRequest { url: String },
 }
 
@@ -31,11 +32,14 @@ pub enum NodeMessage {
     ConnectionInfo(String, u16),
     GetConnectedNodes,
     ConnectedNodes(Vec<String>),
+    SubmitTask { id: String, task: Task },
+    GetTaskResult(String),
     Disconnect,
     Heartbeat,
     HeartbeatAck,
     AssignTask { id: String, task: Task },
     TaskResult { id: String, result: TaskResult },
+    TaskAccepted(String),
     DirectMessage(String),
 }
 

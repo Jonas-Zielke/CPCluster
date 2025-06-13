@@ -1,0 +1,13 @@
+[package]
+name = "cpcluster_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+cpcluster_common = { path = "../cpcluster_common" }
+uuid = { version = "1", features = ["v4"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+env_logger = "0.10"
+log = "0.4"
