@@ -299,8 +299,7 @@ async fn reconnect(
         }
     }
 
-    Err(Box::new(std::io::Error::new(
-        std::io::ErrorKind::Other,
+    Err(Box::new(std::io::Error::other(
         "Unable to reconnect to any master node",
     )))
 }

@@ -32,7 +32,7 @@ impl Config {
     pub fn load(path: &str) -> std::io::Result<Self> {
         match fs::read_to_string(path) {
             Ok(data) => serde_json::from_str(&data)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+                .map_err(std::io::Error::other),
             Err(_) => Ok(Config::default()),
         }
     }
