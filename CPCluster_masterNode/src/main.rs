@@ -514,8 +514,8 @@ where
         }
 
         // Entferne die Node aus der Liste der verbundenen Nodes
-    master_node.connected_nodes.lock().await.remove(&addr);
-    save_state(&master_node).await;
+        master_node.connected_nodes.lock().await.remove(&addr);
+        save_state(&master_node).await;
     } else {
         warn!("Client provided an invalid token {}", received_token);
         write_length_prefixed(&mut socket, b"Invalid token").await?;
