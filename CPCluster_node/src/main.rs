@@ -229,8 +229,14 @@ fn build_tls_config(
             })?;
         }
     } else {
-        let native = native_certs::load_native_certs().expect("could not load platform certs");
-        for cert in native {
+        let native = native_certs::load_native_certs();
+        if !native.errors.is_empty() {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("could not load platform certs: {:?}", native.errors),
+            )));
+        }
+        for cert in native.certs {
             root_store
                 .add(&rustls::Certificate(cert.as_ref().to_vec()))
                 .map_err(|e| {
