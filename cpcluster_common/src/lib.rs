@@ -1,3 +1,4 @@
+//! Shared types for CPCluster nodes and clients.
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
