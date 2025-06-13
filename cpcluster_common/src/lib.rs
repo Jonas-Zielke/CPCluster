@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 pub struct JoinInfo {
     pub token: String,
     pub ip: String,
-    pub port: String,
+    pub port: u16,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
