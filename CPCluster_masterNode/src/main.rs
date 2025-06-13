@@ -105,11 +105,12 @@ struct MasterNode {
     completed_tasks: Arc<Mutex<HashMap<String, TaskResult>>>,
 }
 
-fn assign_tasks_to_nodes(master: &MasterNode) {
+async fn assign_tasks_to_nodes(master: &MasterNode) {
     let tasks: Vec<(String, Task)> = {
         master
             .pending_tasks
-            .blocking_lock()
+            .lock()
+            .await
             .iter()
             .map(|(id, t)| (id.clone(), t.clone()))
             .collect()
@@ -117,7 +118,7 @@ fn assign_tasks_to_nodes(master: &MasterNode) {
     if tasks.is_empty() {
         return;
     }
-    let mut nodes = master.connected_nodes.blocking_lock();
+    let mut nodes = master.connected_nodes.lock().await;
     nodes.retain(|_, n| n.is_worker);
     if nodes.is_empty() {
         return;
@@ -131,7 +132,9 @@ fn assign_tasks_to_nodes(master: &MasterNode) {
     }
 }
 
-fn run_shell(master: Arc<MasterNode>) {
+use tokio::runtime::Handle;
+
+fn run_shell(master: Arc<MasterNode>, rt: Handle) {
     use std::io::{self, BufRead, Write};
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
@@ -231,7 +234,7 @@ fn run_shell(master: Arc<MasterNode>) {
                             .pending_tasks
                             .blocking_lock()
                             .insert(id.clone(), task);
-                        save_state(&master);
+                        rt.block_on(save_state(&master));
                         println!("Queued task {}", id);
                     }
                 }
@@ -301,11 +304,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         pending_tasks: Arc::new(Mutex::new(HashMap::new())),
         completed_tasks: Arc::new(Mutex::new(HashMap::new())),
     });
-    load_state(&master_node);
+    load_state(&master_node).await;
 
     let shell_master = Arc::clone(&master_node);
+    let rt_handle = tokio::runtime::Handle::current();
     std::thread::spawn(move || {
-        run_shell(shell_master);
+        run_shell(shell_master, rt_handle);
     });
 
     // Cleanup task to remove nodes that stopped sending heartbeats
@@ -314,7 +318,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         let interval = Duration::from_millis(config.failover_timeout_ms);
         loop {
             tokio::time::sleep(interval).await;
-            cleanup_dead_nodes(&cleanup_master);
+            cleanup_dead_nodes(&cleanup_master).await;
         }
     });
 
@@ -377,7 +381,7 @@ where
                 is_worker: false,
             },
         );
-        save_state(&master_node);
+        save_state(&master_node).await;
         // assign any pending tasks to this node immediately
         if let Err(e) = send_pending_tasks(&mut socket, &master_node, &addr).await {
             error!("Failed to send pending tasks: {}", e);
@@ -411,7 +415,7 @@ where
                 }
                 NodeMessage::RequestConnection(target_id) => {
                     // Prüfe, ob ein freier Port verfügbar ist
-                    if let Some(port) = allocate_port(&master_node) {
+                    if let Some(port) = allocate_port(&master_node).await {
                         master_node
                             .connected_nodes
                             .lock()
@@ -446,7 +450,7 @@ where
                         .lock()
                         .await
                         .insert(id.clone(), task);
-                    save_state(&master_node);
+                    save_state(&master_node).await;
                     let ack = serde_json::to_vec(&NodeMessage::TaskAccepted(id))?;
                     write_length_prefixed(&mut socket, &ack).await?;
                 }
@@ -465,9 +469,9 @@ where
                 NodeMessage::Disconnect => {
                     // Entferne die Node und gebe den Port frei
                     info!("Node disconnected and port released.");
-                    release_port(&master_node, addr.clone());
+                    release_port(&master_node, addr.clone()).await;
                     master_node.connected_nodes.lock().await.remove(&addr);
-                    save_state(&master_node);
+                    save_state(&master_node).await;
                     break;
                 }
                 NodeMessage::Heartbeat => {
@@ -499,7 +503,7 @@ where
                         .lock()
                         .await
                         .insert(id.clone(), result);
-                    save_state(&master_node);
+                    save_state(&master_node).await;
                 }
                 _ => warn!("Unknown request"),
             }
@@ -511,7 +515,7 @@ where
 
         // Entferne die Node aus der Liste der verbundenen Nodes
         master_node.connected_nodes.lock().await.remove(&addr);
-        save_state(&master_node);
+        save_state(&master_node).await;
     } else {
         warn!("Client provided an invalid token {}", received_token);
         write_length_prefixed(&mut socket, b"Invalid token").await?;
@@ -524,9 +528,9 @@ fn generate_token() -> String {
     Uuid::new_v4().to_string()
 }
 
-fn allocate_port(master_node: &MasterNode) -> Option<u16> {
+async fn allocate_port(master_node: &MasterNode) -> Option<u16> {
     let port = {
-        let mut ports = master_node.available_ports.blocking_lock();
+        let mut ports = master_node.available_ports.lock().await;
         let port_opt = ports.iter().cloned().next();
         if let Some(p) = port_opt {
             ports.remove(&p);
@@ -536,20 +540,20 @@ fn allocate_port(master_node: &MasterNode) -> Option<u16> {
         }
     };
     if port.is_some() {
-        save_state(master_node);
+        save_state(master_node).await;
     }
     port
 }
 
-fn release_port(master_node: &MasterNode, addr: String) {
+async fn release_port(master_node: &MasterNode, addr: String) {
     let port = {
-        let mut nodes = master_node.connected_nodes.blocking_lock();
+        let mut nodes = master_node.connected_nodes.lock().await;
         nodes.get_mut(&addr).and_then(|info| info.port.take())
     };
     if let Some(p) = port {
-        master_node.available_ports.blocking_lock().insert(p);
+        master_node.available_ports.lock().await.insert(p);
     }
-    save_state(master_node);
+    save_state(master_node).await;
 }
 
 fn now_ms() -> u64 {
@@ -559,12 +563,12 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn cleanup_dead_nodes(master: &MasterNode) {
+async fn cleanup_dead_nodes(master: &MasterNode) {
     let timeout = master.failover_timeout_ms * 2;
     let now = now_ms();
     let mut stale = Vec::new();
     {
-        let nodes = master.connected_nodes.blocking_lock();
+        let nodes = master.connected_nodes.lock().await;
         for (addr, info) in nodes.iter() {
             if now.saturating_sub(info.last_heartbeat) > timeout {
                 stale.push(addr.clone());
@@ -573,16 +577,16 @@ fn cleanup_dead_nodes(master: &MasterNode) {
     }
     for addr in stale {
         warn!("Node {} timed out", addr);
-        let info_opt = { master.connected_nodes.blocking_lock().remove(&addr) };
+        let info_opt = { master.connected_nodes.lock().await.remove(&addr) };
         if let Some(info) = info_opt {
-            let mut pending = master.pending_tasks.blocking_lock();
+            let mut pending = master.pending_tasks.lock().await;
             for (id, task) in info.active_tasks {
                 pending.insert(id, task);
             }
         }
-        release_port(master, addr);
+        release_port(master, addr.clone()).await;
     }
-    save_state(master);
+    save_state(master).await;
 }
 
 fn load_or_generate_tls_config(
@@ -630,32 +634,33 @@ struct MasterState {
     completed_tasks: HashMap<String, TaskResult>,
 }
 
-fn load_state(master: &MasterNode) {
-    if let Ok(data) = fs::read_to_string("master_state.json") {
+async fn load_state(master: &MasterNode) {
+    if let Ok(data) = tokio::fs::read_to_string("master_state.json").await {
         if let Ok(state) = serde_json::from_str::<MasterState>(&data) {
-            *master.connected_nodes.blocking_lock() = state.connected_nodes;
-            *master.available_ports.blocking_lock() = state.available_ports.into_iter().collect();
-            *master.pending_tasks.blocking_lock() = state.pending_tasks;
-            *master.completed_tasks.blocking_lock() = state.completed_tasks;
+            *master.connected_nodes.lock().await = state.connected_nodes;
+            *master.available_ports.lock().await = state.available_ports.into_iter().collect();
+            *master.pending_tasks.lock().await = state.pending_tasks;
+            *master.completed_tasks.lock().await = state.completed_tasks;
         }
     }
-    assign_tasks_to_nodes(master);
+    assign_tasks_to_nodes(master).await;
 }
 
-fn save_state(master: &MasterNode) {
+async fn save_state(master: &MasterNode) {
     let state = MasterState {
-        connected_nodes: master.connected_nodes.blocking_lock().clone(),
+        connected_nodes: master.connected_nodes.lock().await.clone(),
         available_ports: master
             .available_ports
-            .blocking_lock()
+            .lock()
+            .await
             .iter()
             .cloned()
             .collect(),
-        pending_tasks: master.pending_tasks.blocking_lock().clone(),
-        completed_tasks: master.completed_tasks.blocking_lock().clone(),
+        pending_tasks: master.pending_tasks.lock().await.clone(),
+        completed_tasks: master.completed_tasks.lock().await.clone(),
     };
     if let Ok(data) = serde_json::to_string_pretty(&state) {
-        let _ = fs::write("master_state.json", data);
+        let _ = tokio::fs::write("master_state.json", data).await;
     }
-    assign_tasks_to_nodes(master);
+    assign_tasks_to_nodes(master).await;
 }
