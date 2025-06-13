@@ -31,6 +31,22 @@ Nodes periodically send heartbeats. If one fails, the failover timeout defined i
 
 - `send_message()` – helper to serialize a `NodeMessage` and send it via `TcpStream`.
 
+### Node roles and configuration
+
+Nodes can operate in different roles defined in `config.json`:
+
+- `Worker` – default mode executing tasks purely in memory.
+- `Disk` – provides persistent storage using `storage_dir` and `disk_space_mb`.
+- `Internet` – reachable from public networks and always uses TLS.
+
+Important configuration fields include:
+
+- `storage_dir` – directory used for disk tasks or shared RAM disks.
+- `disk_space_mb` – quota for disk nodes.
+- `failover_timeout_ms` and `master_addresses` – reconnection behaviour.
+
+`cpcluster_common::Task` includes variants such as `Tcp`, `Udp`, `ComplexMath`, `StoreData`, `RetrieveData`, `DiskWrite` and `DiskRead` in addition to compute and HTTP requests.
+
 ## Contribution hints
 
 1. Make sure [Rust](https://www.rust-lang.org/) is installed. You can run `./setup_container.sh` from the repository root to install all dependencies and build the project.
