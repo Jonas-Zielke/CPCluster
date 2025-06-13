@@ -4,7 +4,7 @@
 
 ## Provided Types
 
-- `JoinInfo` – contains the authentication token and address information published by the master in `join.json`.
+- `JoinInfo` – contains the authentication token and address information (IP and numerical port) published by the master in `join.json`.
 - `NodeMessage` – enum describing messages exchanged over TCP:
   - `RequestConnection(String)` – ask the master to connect to another node.
   - `ConnectionInfo(String, u16)` – master response giving target IP and port.

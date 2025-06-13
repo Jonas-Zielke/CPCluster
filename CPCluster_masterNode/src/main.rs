@@ -269,17 +269,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .unwrap_or_else(|| "127.0.0.1:55000".to_string());
     let mut parts = addr.split(':');
     let ip = parts.next().unwrap_or("127.0.0.1").to_string();
-    let port = parts.next().unwrap_or("55000").to_string();
+    let port: u16 = parts.next().unwrap_or("55000").parse().unwrap_or(55000);
 
     let join_info = JoinInfo {
         token: token.clone(),
         ip: ip.clone(),
-        port: port.clone(),
+        port,
     };
     fs::write("join.json", serde_json::to_string_pretty(&join_info)?)?;
     info!("Join information saved to join.json");
 
-    let listener = TcpListener::bind(format!("{}:{}", ip, port)).await?;
+    let listener = TcpListener::bind((ip.as_str(), port)).await?;
     info!("Master Node listening on {}:{}", ip, port);
 
     // prepare TLS acceptor using configured or self-signed certificate

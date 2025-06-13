@@ -131,7 +131,7 @@ addtask http https://example.com
 {
   "token": "your-unique-token-here",
   "ip": "127.0.0.1",
-  "port": "55000"
+  "port": 55000
 }
 ```
 

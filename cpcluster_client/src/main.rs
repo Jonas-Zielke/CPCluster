@@ -11,7 +11,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     env_logger::init();
     let join_info: JoinInfo = serde_json::from_str(&fs::read_to_string("join.json")?)?;
     let addr = format!("{}:{}", join_info.ip, join_info.port);
-    let mut stream = TcpStream::connect(addr).await?;
+    let mut stream = TcpStream::connect(&addr).await?;
 
     write_length_prefixed(&mut stream, join_info.token.as_bytes()).await?;
     let resp = read_length_prefixed(&mut stream).await?;
