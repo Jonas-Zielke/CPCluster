@@ -1,6 +1,6 @@
 # cpcluster_common
 
-`cpcluster_common` provides shared data types used by the CPCluster master node and normal nodes. It defines the structures for authentication and the messages exchanged between peers.
+`cpcluster_common` provides shared data types used by the CPCluster master node and worker nodes. It defines the structures for authentication and the messages exchanged between peers. The crate targets the Rust **2021** edition.
 
 ## Provided Types
 
