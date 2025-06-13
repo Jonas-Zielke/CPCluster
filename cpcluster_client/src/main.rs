@@ -1,8 +1,10 @@
-use cpcluster_common::{read_length_prefixed, write_length_prefixed, JoinInfo, NodeMessage, Task, TaskResult};
+use cpcluster_common::{
+    JoinInfo, NodeMessage, Task, TaskResult, read_length_prefixed, write_length_prefixed,
+};
 use std::{borrow::Cow, error::Error, fs};
 use tokio::net::TcpStream;
+use tokio::time::{Duration, sleep};
 use uuid::Uuid;
-use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -13,11 +15,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     write_length_prefixed(&mut stream, join_info.token.as_bytes()).await?;
     let resp = read_length_prefixed(&mut stream).await?;
-    if resp == b"Invalid token" { return Err("authentication failed".into()); }
+    if resp == b"Invalid token" {
+        return Err("authentication failed".into());
+    }
 
     let id = Uuid::new_v4().to_string();
-    let task = Task::Compute { expression: Cow::Borrowed("1+2") };
-    let msg = NodeMessage::SubmitTask { id: id.clone(), task };
+    let task = Task::Compute {
+        expression: Cow::Borrowed("1+2"),
+    };
+    let msg = NodeMessage::SubmitTask {
+        id: id.clone(),
+        task,
+    };
     write_length_prefixed(&mut stream, &serde_json::to_vec(&msg)?).await?;
     let _ = read_length_prefixed(&mut stream).await?; // TaskAccepted
 
@@ -31,8 +40,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 if let TaskResult::Number(v) = result {
                     let expr = format!("{} * 3", v);
                     let id2 = Uuid::new_v4().to_string();
-                    let task2 = Task::Compute { expression: Cow::Owned(expr) };
-                    let msg2 = NodeMessage::SubmitTask { id: id2.clone(), task: task2 };
+                    let task2 = Task::Compute {
+                        expression: Cow::Owned(expr),
+                    };
+                    let msg2 = NodeMessage::SubmitTask {
+                        id: id2.clone(),
+                        task: task2,
+                    };
                     write_length_prefixed(&mut stream, &serde_json::to_vec(&msg2)?).await?;
                     let _ = read_length_prefixed(&mut stream).await?;
                     loop {
