@@ -23,19 +23,10 @@
     expression uses `Cow<'static, str>` so it can borrow a string slice or own
     the data.
   - `HttpRequest { url }` – perform a HTTP GET request.
-  - `TcpIo { addr, port, data }` – send bytes over TCP and return the response.
-  - `UdpIo { addr, port, data }` – send bytes over UDP.
-  - `ComplexMath { expression }` – evaluate a more expensive expression.
-  - `StoreData { key, data }` and `RetrieveData { key }` – work with in-memory
-    storage.
-  - `DiskWrite { path, data }` and `DiskRead { path }` – interact with the
-    filesystem.
 
 - `TaskResult` – returned from task execution:
   - `Number(f64)` – result of a computation.
   - `Response(String)` – body of an HTTP request.
-  - `Bytes(Vec<u8>)` – raw bytes returned from I/O.
-  - `Stored` – confirmation that data was stored.
   - `Error(String)` – task failed with this error.
 
 These types are `serde` serializable and are used by both the `cpcluster_masternode` and `cpcluster_node` crates.
