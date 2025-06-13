@@ -1,5 +1,5 @@
 use cpcluster_common::{Task, TaskResult};
-use cpcluster_node::execute_task;
+use cpcluster_node::{execute_task, memory_store::MemoryStore};
 use reqwest::Client;
 use tempfile::tempdir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,6 +17,7 @@ async fn tcp_and_udp_tasks() {
         socket.write_all(b"world").await.unwrap();
     });
     let client = Client::new();
+    let store = MemoryStore::new();
     let res = execute_task(
         Task::Tcp {
             addr: tcp_addr.to_string(),
@@ -24,6 +25,7 @@ async fn tcp_and_udp_tasks() {
         },
         &client,
         "./",
+        &store,
     )
     .await;
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"world"));
@@ -44,6 +46,7 @@ async fn tcp_and_udp_tasks() {
         },
         &client,
         "./",
+        &store,
     )
     .await;
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"pong"));
@@ -52,6 +55,7 @@ async fn tcp_and_udp_tasks() {
 #[tokio::test]
 async fn complex_and_storage_tasks() {
     let client = Client::new();
+    let store = MemoryStore::new();
     // complex math
     let res = execute_task(
         Task::ComplexMath {
@@ -59,6 +63,7 @@ async fn complex_and_storage_tasks() {
         },
         &client,
         "./",
+        &store,
     )
     .await;
     assert!(matches!(res, TaskResult::Response(ref s) if s.trim() == "4-2i"));
@@ -71,10 +76,17 @@ async fn complex_and_storage_tasks() {
         },
         &client,
         "./",
+        &store,
     )
     .await;
     assert!(matches!(res, TaskResult::Stored));
-    let res = execute_task(Task::RetrieveData { key: "k".into() }, &client, "./").await;
+    let res = execute_task(
+        Task::RetrieveData { key: "k".into() },
+        &client,
+        "./",
+        &store,
+    )
+    .await;
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"data"));
 }
 
@@ -83,6 +95,7 @@ async fn disk_tasks() {
     let dir = tempdir().unwrap();
     let path = dir.path().to_str().unwrap();
     let client = Client::new();
+    let store = MemoryStore::new();
     let res = execute_task(
         Task::DiskWrite {
             path: "file.bin".into(),
@@ -90,6 +103,7 @@ async fn disk_tasks() {
         },
         &client,
         path,
+        &store,
     )
     .await;
     assert!(matches!(res, TaskResult::Written));
@@ -99,6 +113,7 @@ async fn disk_tasks() {
         },
         &client,
         path,
+        &store,
     )
     .await;
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"d"));

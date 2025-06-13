@@ -2,7 +2,7 @@ use cpcluster_common::config::Config;
 use cpcluster_common::{
     is_local_ip, read_length_prefixed, write_length_prefixed, JoinInfo, NodeMessage,
 };
-use cpcluster_node::execute_task;
+use cpcluster_node::{execute_task, memory_store::MemoryStore};
 use log::{error, info, warn};
 use reqwest::Client;
 use rustls_native_certs as native_certs;
@@ -27,6 +27,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let mut stream: Option<Box<dyn ReadWrite + Unpin + Send>> = None;
     let open_tasks: Arc<Mutex<HashMap<String, NodeMessage>>> = Arc::new(Mutex::new(HashMap::new()));
+    let memory = MemoryStore::new();
     for addr in &config.master_addresses {
         match connect(
             addr,
@@ -117,6 +118,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             let ca_path = config.ca_cert_path.clone();
                             let ca_cert = config.ca_cert.clone();
                             let storage = config.storage_dir.clone();
+                            let mem = memory.clone();
                             tokio::spawn(async move {
                                 if let Err(e) = handle_connection(
                                     target,
@@ -125,6 +127,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                                     ca_path.as_deref(),
                                     ca_cert.as_deref(),
                                     &storage,
+                                    mem,
                                 ).await {
                                     error!("Direct connection error: {}", e);
                                 }
@@ -134,7 +137,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             info!("Received heartbeat acknowledgement from master");
                         }
                         NodeMessage::AssignTask { id, task } => {
-                            let result = execute_task(task, &http_client, &config.storage_dir).await;
+                            let result = execute_task(
+                                task,
+                                &http_client,
+                                &config.storage_dir,
+                                &memory,
+                            )
+                            .await;
                             let msg = NodeMessage::TaskResult {
                                 id: id.clone(),
                                 result,
@@ -297,6 +306,7 @@ async fn handle_connection(
     ca_path: Option<&str>,
     ca_cert: Option<&str>,
     storage_dir: &str,
+    memory: MemoryStore,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let addr = format!("{}:{}", target, port);
     let use_tls = !is_local_ip(&target);
@@ -336,7 +346,7 @@ async fn handle_connection(
             Err(_) => break,
         };
         if let Ok(NodeMessage::AssignTask { id, task }) = serde_json::from_slice(&buf) {
-            let result = execute_task(task, &client, storage_dir).await;
+            let result = execute_task(task, &client, storage_dir, &memory).await;
             let msg = NodeMessage::TaskResult {
                 id: id.clone(),
                 result,
