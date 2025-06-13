@@ -31,6 +31,7 @@ async fn execute_task(task: Task, client: &Client) -> TaskResult {
             },
             Err(e) => TaskResult::Error(e.to_string()),
         },
+        _ => TaskResult::Error("Unsupported task".into()),
     }
 }
 
