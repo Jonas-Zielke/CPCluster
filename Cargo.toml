@@ -2,6 +2,7 @@
 members = [
     "CPCluster_masterNode",
     "CPCluster_node",
+    "cpcluster_client",
     "cpcluster_common"
 ]
 resolver = "2"
