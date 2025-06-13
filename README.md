@@ -2,6 +2,8 @@
 
 CPCluster is a distributed network of nodes that communicate with each other for task distribution. The master node in CPCluster serves as a connection manager, coordinating direct connections between nodes without routing their tasks through the master. This approach minimizes latency, improves task performance, and centralizes connection management.
 
+For an overview of the repository structure see docs/PROJECT_OVERVIEW.md.
+
 ## Features
 
 - **Centralized Connection Management**: The master node manages node connections and assigns direct ports for inter-node communication.
