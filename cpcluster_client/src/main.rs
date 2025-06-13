@@ -1,10 +1,28 @@
 use cpcluster_common::{
     JoinInfo, NodeMessage, Task, TaskResult, read_length_prefixed, write_length_prefixed,
 };
+use meval::eval_str;
+use reqwest::Client;
 use std::{borrow::Cow, error::Error, fs};
 use tokio::net::TcpStream;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
+
+async fn execute_task(task: Task, client: &Client) -> TaskResult {
+    match task {
+        Task::Compute { expression } => match eval_str(&expression) {
+            Ok(v) => TaskResult::Number(v),
+            Err(e) => TaskResult::Error(e.to_string()),
+        },
+        Task::HttpRequest { url } => match client.get(&url).send().await {
+            Ok(resp) => match resp.text().await {
+                Ok(text) => TaskResult::Response(text),
+                Err(e) => TaskResult::Error(e.to_string()),
+            },
+            Err(e) => TaskResult::Error(e.to_string()),
+        },
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -19,10 +37,36 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         return Err("authentication failed".into());
     }
 
+    // check if any nodes are connected; if none, execute tasks locally
+    let nodes_req = NodeMessage::GetConnectedNodes;
+    write_length_prefixed(&mut stream, &serde_json::to_vec(&nodes_req)?).await?;
+    let buf = read_length_prefixed(&mut stream).await?;
+    let local_execute = match serde_json::from_slice::<NodeMessage>(&buf)? {
+        NodeMessage::ConnectedNodes(nodes) => nodes.is_empty(),
+        _ => false,
+    };
+
+    let http_client = Client::new();
+
     let id = Uuid::new_v4().to_string();
     let task = Task::Compute {
         expression: Cow::Borrowed("1+2"),
     };
+
+    if local_execute {
+        let result = execute_task(task.clone(), &http_client).await;
+        println!("first result: {:?}", result);
+        if let TaskResult::Number(v) = result {
+            let expr = format!("{} * 3", v);
+            let task2 = Task::Compute {
+                expression: Cow::Owned(expr),
+            };
+            let result2 = execute_task(task2, &http_client).await;
+            println!("chained result: {:?}", result2);
+        }
+        return Ok(());
+    }
+
     let msg = NodeMessage::SubmitTask {
         id: id.clone(),
         task,
