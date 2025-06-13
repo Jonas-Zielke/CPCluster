@@ -27,6 +27,22 @@ impl DiskStore {
     pub async fn load(&self, id: &str) -> Option<Vec<u8>> {
         fs::read(self.dir.join(id)).await.ok()
     }
+
+    /// Return a list of all stored files with their size in bytes and the remaining free space
+    pub async fn stats(&self) -> std::io::Result<(Vec<(String, u64)>, u64)> {
+        fs::create_dir_all(&self.dir).await?;
+        let mut entries = Vec::new();
+        let mut dir = fs::read_dir(&self.dir).await?;
+        while let Some(entry) = dir.next_entry().await? {
+            let meta = entry.metadata().await?;
+            if meta.is_file() {
+                entries.push((entry.file_name().to_string_lossy().to_string(), meta.len()));
+            }
+        }
+        let used = directory_size(&self.dir)?;
+        let free = self.quota_bytes.saturating_sub(used);
+        Ok((entries, free))
+    }
 }
 
 fn directory_size(path: &Path) -> std::io::Result<u64> {

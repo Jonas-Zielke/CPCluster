@@ -19,4 +19,10 @@ impl MemoryStore {
     pub async fn load(&self, id: &str) -> Option<Vec<u8>> {
         self.inner.lock().await.get(id).cloned()
     }
+
+    /// Return a list of all stored keys with their size in bytes
+    pub async fn stats(&self) -> Vec<(String, usize)> {
+        let map = self.inner.lock().await;
+        map.iter().map(|(k, v)| (k.clone(), v.len())).collect()
+    }
 }
