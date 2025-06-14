@@ -1,5 +1,5 @@
 use cpcluster_common::config::Config;
-use cpcluster_common::{JoinInfo, NodeMessage, is_local_ip};
+use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage};
 use cpcluster_common::{read_length_prefixed, write_length_prefixed};
 use log::{error, info, warn};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -14,7 +14,7 @@ pub mod state;
 pub mod tls;
 
 use shell::run_shell;
-use state::{MasterNode, NodeInfo, load_state, save_state};
+use state::{load_state, save_state, MasterNode, NodeInfo};
 use tls::load_or_generate_tls_config;
 
 async fn send_pending_tasks<S>(

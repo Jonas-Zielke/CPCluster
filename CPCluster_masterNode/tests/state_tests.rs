@@ -1,12 +1,12 @@
 use cpcluster_common::Task;
-use cpcluster_masternode::state::{MasterNode, load_state, save_state};
+use cpcluster_masternode::state::{load_state, save_state, MasterNode};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tempfile::tempdir;
 
 #[tokio::test]
-async fn master_state_persists_pending_tasks()
--> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn master_state_persists_pending_tasks(
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let dir = tempdir()?;
     let state_path = dir.path().join("master_state.json");
 
