@@ -6,15 +6,15 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, UdpSocket};
 
 #[tokio::test]
-async fn tcp_and_udp_tasks() {
+async fn tcp_and_udp_tasks() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // TCP echo
-    let tcp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let tcp_addr = tcp_listener.local_addr().unwrap();
+    let tcp_listener = TcpListener::bind("127.0.0.1:0").await?;
+    let tcp_addr = tcp_listener.local_addr()?;
     tokio::spawn(async move {
-        let (mut socket, _) = tcp_listener.accept().await.unwrap();
+        let (mut socket, _) = tcp_listener.accept().await.expect("accept tcp");
         let mut buf = [0u8; 5];
-        socket.read_exact(&mut buf).await.unwrap();
-        socket.write_all(b"world").await.unwrap();
+        socket.read_exact(&mut buf).await.expect("read tcp");
+        socket.write_all(b"world").await.expect("write tcp");
     });
     let client = Client::new();
     let store = MemoryStore::new();
@@ -33,13 +33,13 @@ async fn tcp_and_udp_tasks() {
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"world"));
 
     // UDP echo
-    let udp_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let udp_addr = udp_socket.local_addr().unwrap();
+    let udp_socket = UdpSocket::bind("127.0.0.1:0").await?;
+    let udp_addr = udp_socket.local_addr()?;
     tokio::spawn(async move {
         let mut buf = [0u8; 5];
-        let (n, peer) = udp_socket.recv_from(&mut buf).await.unwrap();
+        let (n, peer) = udp_socket.recv_from(&mut buf).await.expect("udp recv");
         assert_eq!(&buf[..n], b"ping");
-        udp_socket.send_to(b"pong", &peer).await.unwrap();
+        udp_socket.send_to(b"pong", &peer).await.expect("udp send");
     });
     let res = execute_task(
         Task::Udp {
@@ -54,10 +54,11 @@ async fn tcp_and_udp_tasks() {
     )
     .await;
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"pong"));
+    Ok(())
 }
 
 #[tokio::test]
-async fn complex_and_storage_tasks() {
+async fn complex_and_storage_tasks() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = Client::new();
     let store = MemoryStore::new();
     // complex math
@@ -98,12 +99,13 @@ async fn complex_and_storage_tasks() {
     )
     .await;
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"data"));
+    Ok(())
 }
 
 #[tokio::test]
-async fn disk_tasks() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().to_str().unwrap();
+async fn disk_tasks() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let dir = tempdir()?;
+    let path = dir.path().to_str().expect("path to str");
     let client = Client::new();
     let store = MemoryStore::new();
     let res = execute_task(
@@ -131,4 +133,5 @@ async fn disk_tasks() {
     )
     .await;
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"d"));
+    Ok(())
 }
