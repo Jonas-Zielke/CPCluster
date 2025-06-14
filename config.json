@@ -9,5 +9,6 @@
   "key_path": null,
   "storage_dir": "storage",
   "state_file": "master_state.json",
-  "max_retries": 5
+  "max_retries": 5,
+  "log_level": "info"
 }

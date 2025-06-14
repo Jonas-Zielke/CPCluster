@@ -6,3 +6,4 @@ This document tracks notable milestones in the project.
 - Initial node-to-node communication via the master node.
 - Basic task execution including compute and HTTP requests.
 - Failover logic with task reassignment on disconnect.
+- Configurable logging level via `log_level` setting.
