@@ -1,5 +1,6 @@
 use crate::{
-    disk_store::DiskStore, execute_node_task, internet_ports::InternetPorts, memory_store::MemoryStore,
+    disk_store::DiskStore, execute_node_task, internet_ports::InternetPorts,
+    memory_store::MemoryStore,
 };
 use cpcluster_common::config::Config;
 use cpcluster_common::{
