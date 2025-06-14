@@ -2,6 +2,18 @@
 
 `cpcluster_node` is a simple client used to join the CPCluster network. It reads the `join.json` file created by the master (use `CPCLUSTER_JOIN` to set a custom path), connects over TCP and exchanges `NodeMessage` requests. The token can also be supplied via the `CPCLUSTER_TOKEN` environment variable.
 
+## Configuration
+
+The node loads runtime options from `config.json` in the current directory. Pass a different file path as the first command line argument to `cargo run` to override it.
+
+Key fields include:
+
+- **`role`** – choose `Worker` (default), `Disk` or `Internet`.
+- **`storage_dir`** – directory used for on-disk tasks or RAM-disk storage.
+- **`internet_ports`** – list of ports Internet nodes open for external connections.
+
+`join.json` is expected in the working directory but can be overridden with the `CPCLUSTER_JOIN` environment variable. Likewise the connection token may be supplied via `CPCLUSTER_TOKEN`.
+
 ## Workflow
 
 1. Parse `join.json` to obtain the authentication token and master address. Set the `CPCLUSTER_TOKEN` environment variable to override the token at runtime. Use `CPCLUSTER_JOIN` if the file is stored elsewhere.
