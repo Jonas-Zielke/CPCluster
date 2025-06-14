@@ -54,11 +54,13 @@ else
     echo "Rust is already installed"
 fi
 
-# Build all crates so they are ready for use
-for dir in cpcluster_common cpcluster_client CPCluster_masterNode CPCluster_node; do
-    echo "Building $dir..."
-    (cd "$dir" && cargo build --release)
-    echo "Finished building $dir"
-done
+# Ensure rustfmt and clippy are available
+rustup component add rustfmt clippy
+
+
+# Build the entire workspace so it is ready for use
+echo "Building workspace..."
+cargo build --workspace --release
+echo "Finished building workspace"
 
 echo "Setup complete. Use 'cargo run' in each directory to start the master or node."
