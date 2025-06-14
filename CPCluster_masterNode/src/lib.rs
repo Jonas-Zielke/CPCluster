@@ -3,7 +3,12 @@ use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage};
 use cpcluster_common::{read_length_prefixed, write_length_prefixed};
 use log::{error, info, warn};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{collections::HashMap, error::Error, fs, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    error::Error,
+    fs,
+    sync::Arc,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -89,13 +94,7 @@ fn generate_token() -> String {
 async fn allocate_port(master_node: &MasterNode) -> Option<u16> {
     let port = {
         let mut ports = master_node.available_ports.lock().await;
-        let port_opt = ports.iter().cloned().next();
-        if let Some(p) = port_opt {
-            ports.remove(&p);
-            Some(p)
-        } else {
-            None
-        }
+        ports.pop_front()
     };
     if port.is_some() {
         save_state(master_node).await;
@@ -109,7 +108,7 @@ async fn release_port(master_node: &MasterNode, addr: String) {
         nodes.get_mut(&addr).and_then(|info| info.port.take())
     };
     if let Some(p) = port {
-        master_node.available_ports.lock().await.insert(p);
+        master_node.available_ports.lock().await.push_back(p);
     }
     save_state(master_node).await;
 }
@@ -343,7 +342,9 @@ pub async fn run(config_path: &str, join_path: &str) -> Result<(), Box<dyn Error
     let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
     let master_node = Arc::new(MasterNode {
         connected_nodes: Arc::new(Mutex::new(HashMap::new())),
-        available_ports: Arc::new(Mutex::new((config.min_port..=config.max_port).collect())),
+        available_ports: Arc::new(Mutex::new(VecDeque::from(
+            (config.min_port..=config.max_port).collect::<Vec<_>>(),
+        ))),
         failover_timeout_ms: config.failover_timeout_ms,
         pending_tasks: Arc::new(Mutex::new(HashMap::new())),
         completed_tasks: Arc::new(Mutex::new(HashMap::new())),
