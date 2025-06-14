@@ -1,6 +1,6 @@
 use cpcluster_common::Task;
 use cpcluster_masternode::state::{load_state, save_state, MasterNode};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tempfile::tempdir;
 
@@ -12,7 +12,7 @@ async fn master_state_persists_pending_tasks(
 
     let master = MasterNode {
         connected_nodes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        available_ports: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
+        available_ports: Arc::new(tokio::sync::Mutex::new(VecDeque::new())),
         failover_timeout_ms: 1000,
         pending_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         completed_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -30,7 +30,7 @@ async fn master_state_persists_pending_tasks(
 
     let new_master = MasterNode {
         connected_nodes: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-        available_ports: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
+        available_ports: Arc::new(tokio::sync::Mutex::new(VecDeque::new())),
         failover_timeout_ms: 1000,
         pending_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         completed_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),

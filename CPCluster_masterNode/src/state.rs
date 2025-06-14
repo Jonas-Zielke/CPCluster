@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -20,7 +20,7 @@ pub struct NodeInfo {
 #[derive(Debug, Clone)]
 pub struct MasterNode {
     pub connected_nodes: Arc<Mutex<HashMap<String, NodeInfo>>>,
-    pub available_ports: Arc<Mutex<HashSet<u16>>>,
+    pub available_ports: Arc<Mutex<VecDeque<u16>>>,
     pub failover_timeout_ms: u64,
     pub pending_tasks: Arc<Mutex<HashMap<String, Task>>>,
     pub completed_tasks: Arc<Mutex<HashMap<String, TaskResult>>>,
@@ -40,7 +40,7 @@ pub async fn load_state(master: &MasterNode) {
     if let Ok(data) = tokio::fs::read_to_string(&master.state_file).await {
         if let Ok(state) = serde_json::from_str::<MasterState>(&data) {
             *master.connected_nodes.lock().await = state.connected_nodes;
-            *master.available_ports.lock().await = state.available_ports.into_iter().collect();
+            *master.available_ports.lock().await = state.available_ports.into();
             *master.pending_tasks.lock().await = state.pending_tasks;
             *master.completed_tasks.lock().await = state.completed_tasks;
         }
