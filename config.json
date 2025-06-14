@@ -6,6 +6,7 @@
   "ca_cert_path": null,
   "ca_cert": null,
   "cert_path": null,
-  "key_path": null
-  ,"storage_dir": "storage"
+  "key_path": null,
+  "storage_dir": "storage",
+  "max_retries": 5
 }
