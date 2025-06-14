@@ -48,6 +48,14 @@ Important configuration fields include:
 - `internet_ports` – list of ports bound by Internet nodes.
 
 `cpcluster_common::Task` includes variants such as `Tcp`, `Udp`, `ComplexMath`, `StoreData`, `RetrieveData`, `DiskWrite`, `DiskRead`, `GetGlobalRam` and `GetStorage` in addition to compute and HTTP requests.
+
+### Secure token distribution
+
+The master writes a `join.json` file containing the authentication token. Because any node holding this token can join the cluster, distribute it carefully:
+
+- Restrict read permissions so only the intended user can access the file.
+- Copy it over an encrypted channel or encrypt it before transfer (e.g. with `gpg`).
+- Alternatively set the token via the `CPCLUSTER_TOKEN` environment variable or use a secrets manager, keeping only the IP and port in `join.json`.
 ## Contribution hints
 
 
