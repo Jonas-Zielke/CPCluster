@@ -43,7 +43,7 @@ These types are `serde` serializable and are used by both the `cpcluster_mastern
 
 ## Configuration
 
-`Config` offers runtime configuration such as port ranges, failover timeout and the list of master nodes. A default configuration is returned when no `config.json` file is present.
+`Config` offers runtime configuration such as port ranges, failover timeout and the list of master nodes. A default configuration is returned when the specified file is missing. The master and node binaries look for `config.json` unless a different path is provided on the command line.
 
 ## Helper Functions
 

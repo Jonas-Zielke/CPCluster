@@ -309,10 +309,10 @@ where
     Ok(())
 }
 
-pub async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn run(config_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     env_logger::init();
-    let config = Config::load("config.json").unwrap_or_default();
-    config.save("config.json")?;
+    let config = Config::load(config_path).unwrap_or_default();
+    config.save(config_path)?;
     let token = generate_token();
     let addr = config
         .master_addresses
@@ -393,4 +393,8 @@ pub async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             }
         });
     }
+}
+
+pub async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    run("config.json").await
 }
