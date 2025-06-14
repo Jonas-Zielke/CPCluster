@@ -11,7 +11,6 @@ use disk_store::DiskStore;
 use internet_ports::InternetPorts;
 use memory_store::MemoryStore;
 use reqwest::Client;
-use std::path::Path;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream, UdpSocket};
 
@@ -163,20 +162,52 @@ pub async fn execute_task(
             }
         }
         Task::DiskWrite { path, data } => {
-            let full = Path::new(storage_dir).join(&path);
+            if let Err(e) = tokio::fs::create_dir_all(storage_dir).await {
+                return TaskResult::Error(e.to_string());
+            }
+            let base = match tokio::fs::canonicalize(storage_dir).await {
+                Ok(p) => p,
+                Err(e) => return TaskResult::Error(e.to_string()),
+            };
+            let full = base.join(&path);
             if let Some(parent) = full.parent() {
                 if let Err(e) = tokio::fs::create_dir_all(parent).await {
                     return TaskResult::Error(e.to_string());
                 }
             }
-            match tokio::fs::write(&full, &data).await {
+            let canonical = if full.exists() {
+                match tokio::fs::canonicalize(&full).await {
+                    Ok(p) => p,
+                    Err(e) => return TaskResult::Error(e.to_string()),
+                }
+            } else {
+                match tokio::fs::canonicalize(full.parent().unwrap()).await {
+                    Ok(p) => p.join(full.file_name().unwrap()),
+                    Err(e) => return TaskResult::Error(e.to_string()),
+                }
+            };
+            if !canonical.starts_with(&base) {
+                return TaskResult::Error("Invalid path".into());
+            }
+            match tokio::fs::write(&canonical, &data).await {
                 Ok(_) => TaskResult::Written,
                 Err(e) => TaskResult::Error(e.to_string()),
             }
         }
         Task::DiskRead { path } => {
-            let full = Path::new(storage_dir).join(&path);
-            match tokio::fs::read(&full).await {
+            let base = match tokio::fs::canonicalize(storage_dir).await {
+                Ok(p) => p,
+                Err(e) => return TaskResult::Error(e.to_string()),
+            };
+            let full = base.join(&path);
+            let canonical = match tokio::fs::canonicalize(&full).await {
+                Ok(p) => p,
+                Err(e) => return TaskResult::Error(e.to_string()),
+            };
+            if !canonical.starts_with(&base) {
+                return TaskResult::Error("Invalid path".into());
+            }
+            match tokio::fs::read(&canonical).await {
                 Ok(d) => TaskResult::Bytes(d),
                 Err(e) => TaskResult::Error(e.to_string()),
             }

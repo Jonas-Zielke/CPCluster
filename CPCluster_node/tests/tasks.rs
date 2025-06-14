@@ -135,3 +135,41 @@ async fn disk_tasks() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     assert!(matches!(res, TaskResult::Bytes(ref b) if b == b"d"));
     Ok(())
 }
+
+#[tokio::test]
+async fn disk_path_safety() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let dir = tempdir()?;
+    let base = dir.path();
+    let evil_path = base.join("..\u{002f}evil.txt");
+    tokio::fs::write(&evil_path, b"bad").await?;
+    let client = Client::new();
+    let store = MemoryStore::new();
+
+    let res = execute_task(
+        Task::DiskWrite {
+            path: "../evil.txt".into(),
+            data: b"x".to_vec(),
+        },
+        &client,
+        base.to_str().expect("base to str"),
+        &store,
+        None,
+        None,
+    )
+    .await;
+    assert!(matches!(res, TaskResult::Error(_)));
+
+    let res = execute_task(
+        Task::DiskRead {
+            path: "../evil.txt".into(),
+        },
+        &client,
+        base.to_str().expect("base to str"),
+        &store,
+        None,
+        None,
+    )
+    .await;
+    assert!(matches!(res, TaskResult::Error(_)));
+    Ok(())
+}
