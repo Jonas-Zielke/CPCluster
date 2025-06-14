@@ -54,19 +54,26 @@ OpenSSL development libraries manually before building.
    `git`, a C toolchain, `pkg-config` and OpenSSL development libraries manually
    before running the script.
 
-2. **Navigate to each project**:
+2. **Build all crates**:
+   ```bash
+   cargo build --workspace
+   ```
+
+3. *(Optional)* **Build individual projects**:
    - Master Node:
      ```bash
      cd CPCluster_masterNode
+     cargo build
      ```
    - Normal Node:
      ```bash
      cd CPCluster_node
+     cargo build
      ```
 
-3. **Build each project**:
+4. **Run tests**:
    ```bash
-   cargo build
+   cargo test --workspace
    ```
 
 ### Configuration
