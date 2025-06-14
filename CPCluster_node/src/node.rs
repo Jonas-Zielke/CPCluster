@@ -8,6 +8,7 @@ use cpcluster_common::{
 use log::{error, info, warn};
 use reqwest::Client;
 use rustls_native_certs as native_certs;
+use sha2::{Digest, Sha256};
 use std::{collections::HashMap, error::Error, fs, io, sync::Arc};
 use tokio::sync::Mutex;
 use tokio::{
@@ -212,8 +213,38 @@ async fn connect(
         let config = build_tls_config(ca_path, ca_cert)?;
         let connector = TlsConnector::from(Arc::new(config));
         let server_name = rustls::ServerName::try_from(ip)?;
-        let tls = connector.connect(server_name, tcp).await?;
-        Ok(Box::new(tls))
+        match connector.connect(server_name, tcp).await {
+            Ok(tls) => {
+                if let Some(certs) = tls.get_ref().1.peer_certificates() {
+                    if let Some(cert) = certs.first() {
+                        info!(
+                            "Connected to {addr} using cert sha256={:x}",
+                            Sha256::digest(&cert.0)
+                        );
+                    }
+                }
+                Ok(Box::new(tls))
+            }
+            Err(e) => {
+                if let Some(rustls_err) = e
+                    .get_ref()
+                    .and_then(|inner| inner.downcast_ref::<rustls::Error>())
+                {
+                    error!(
+                        "TLS handshake with {addr} failed (kind: {:?}): {:?}",
+                        e.kind(),
+                        rustls_err
+                    );
+                } else {
+                    error!(
+                        "TLS handshake with {addr} failed (kind: {:?}): {}",
+                        e.kind(),
+                        e
+                    );
+                }
+                Err(Box::new(e))
+            }
+        }
     }
 }
 
@@ -344,8 +375,35 @@ async fn handle_connection(
                 let config = build_tls_config(ca_path, ca_cert)?;
                 let connector = TlsConnector::from(Arc::new(config));
                 let server_name = rustls::ServerName::try_from(target.as_str())?;
-                let tls = connector.connect(server_name, sock).await?;
-                stream = Box::new(tls);
+                match connector.connect(server_name, sock).await {
+                    Ok(tls) => {
+                        if let Some(certs) = tls.get_ref().1.peer_certificates() {
+                            if let Some(cert) = certs.first() {
+                                info!("TLS connection to {addr} established with cert sha256={:x}", Sha256::digest(&cert.0));
+                            }
+                        }
+                        stream = Box::new(tls);
+                    }
+                    Err(e) => {
+                        if let Some(rustls_err) = e
+                            .get_ref()
+                            .and_then(|inner| inner.downcast_ref::<rustls::Error>())
+                        {
+                            error!(
+                                "TLS handshake with {addr} failed (kind: {:?}): {:?}",
+                                e.kind(),
+                                rustls_err
+                            );
+                        } else {
+                            error!(
+                                "TLS handshake with {addr} failed (kind: {:?}): {}",
+                                e.kind(),
+                                e
+                            );
+                        }
+                        return Err(Box::new(e));
+                    }
+                }
             } else {
                 stream = Box::new(sock);
             }
@@ -355,8 +413,35 @@ async fn handle_connection(
                 let config = build_tls_config(ca_path, ca_cert)?;
                 let connector = TlsConnector::from(Arc::new(config));
                 let server_name = rustls::ServerName::try_from(target.as_str())?;
-                let tls = connector.connect(server_name, sock).await?;
-                stream = Box::new(tls);
+                match connector.connect(server_name, sock).await {
+                    Ok(tls) => {
+                        if let Some(certs) = tls.get_ref().1.peer_certificates() {
+                            if let Some(cert) = certs.first() {
+                                info!("TLS connection from {addr} established with cert sha256={:x}", Sha256::digest(&cert.0));
+                            }
+                        }
+                        stream = Box::new(tls);
+                    }
+                    Err(e) => {
+                        if let Some(rustls_err) = e
+                            .get_ref()
+                            .and_then(|inner| inner.downcast_ref::<rustls::Error>())
+                        {
+                            error!(
+                                "TLS handshake with {addr} failed (kind: {:?}): {:?}",
+                                e.kind(),
+                                rustls_err
+                            );
+                        } else {
+                            error!(
+                                "TLS handshake with {addr} failed (kind: {:?}): {}",
+                                e.kind(),
+                                e
+                            );
+                        }
+                        return Err(Box::new(e));
+                    }
+                }
             } else {
                 stream = Box::new(sock);
             }

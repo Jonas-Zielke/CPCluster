@@ -116,3 +116,44 @@ async fn node_tls_interaction() -> Result<(), Box<dyn std::error::Error + Send +
     server.await.expect("server task failed");
     Ok(())
 }
+
+#[tokio::test]
+async fn tls_certificate_mismatch() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let cert = generate_simple_self_signed(vec!["localhost".into()])?;
+    let cert_der = cert.serialize_der()?;
+    let key_der = cert.serialize_private_key_der();
+    let tls_config = rustls::ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![rustls::Certificate(cert_der.clone())],
+            rustls::PrivateKey(key_der),
+        )
+        .expect("create TLS config");
+    let acceptor = TlsAcceptor::from(Arc::new(tls_config));
+
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.expect("accept");
+        let _ = acceptor.accept(socket).await;
+    });
+
+    let other = generate_simple_self_signed(vec!["localhost".into()])?;
+    let other_der = other.serialize_der()?;
+    let mut root_store = rustls::RootCertStore::empty();
+    root_store
+        .add(&rustls::Certificate(other_der))
+        .expect("add cert");
+    let client_config = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    let connector = TlsConnector::from(Arc::new(client_config));
+    let tcp = tokio::net::TcpStream::connect(addr).await?;
+    let server_name = rustls::ServerName::try_from("localhost")?;
+    let res = connector.connect(server_name, tcp).await;
+    assert!(res.is_err(), "handshake should fail");
+    server.await.expect("server task failed");
+    Ok(())
+}

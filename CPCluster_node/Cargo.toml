@@ -29,6 +29,7 @@ cpcluster_common = { path = "../cpcluster_common" }
 rustls-native-certs = "0.8"
 log = "0.4"
 env_logger = "0.10"
+sha2 = "0.10"
 
 [dev-dependencies]
 rcgen = "0.9"
