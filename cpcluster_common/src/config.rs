@@ -25,6 +25,8 @@ pub struct Config {
     pub role: NodeRole,
     #[serde(default = "default_max_retries")]
     pub max_retries: u32,
+    #[serde(default)]
+    pub log_level: Option<String>,
 }
 
 impl Default for Config {
@@ -44,6 +46,7 @@ impl Default for Config {
             disk_space_mb: default_disk_space(),
             role: NodeRole::Worker,
             max_retries: default_max_retries(),
+            log_level: None,
         }
     }
 }

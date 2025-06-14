@@ -8,21 +8,21 @@ fn parse_config_path<I: Iterator<Item = String>>(mut args: I) -> String {
     "config.json".to_string()
 }
 
-fn parse_log_level<I: Iterator<Item = String>>(mut args: I) -> log::LevelFilter {
+fn parse_log_level<I: Iterator<Item = String>>(mut args: I) -> Option<log::LevelFilter> {
     args.next();
     let mut expect_level = false;
     for arg in args {
         if expect_level {
-            return arg.parse().unwrap_or(log::LevelFilter::Info);
+            return arg.parse().ok();
         }
         if let Some(level) = arg.strip_prefix("--log-level=") {
-            return level.parse().unwrap_or(log::LevelFilter::Info);
+            return level.parse().ok();
         }
         if arg == "--log-level" {
             expect_level = true;
         }
     }
-    log::LevelFilter::Info
+    None
 }
 
 fn join_path() -> String {
@@ -32,8 +32,12 @@ fn join_path() -> String {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args: Vec<String> = std::env::args().collect();
+    let cli_level = parse_log_level(args.clone().into_iter());
     let config_path = parse_config_path(args.clone().into_iter());
-    let level = parse_log_level(args.into_iter());
+    let config = cpcluster_common::config::Config::load(&config_path).unwrap_or_default();
+    let level = cli_level
+        .or_else(|| config.log_level.as_deref().and_then(|l| l.parse().ok()))
+        .unwrap_or(log::LevelFilter::Info);
     env_logger::Builder::new().filter_level(level).init();
     let join = join_path();
     cpcluster_masternode::run(&config_path, &join).await
@@ -85,12 +89,24 @@ mod tests {
             "--log-level".to_string(),
             "debug".to_string(),
         ];
-        assert_eq!(parse_log_level(args.into_iter()), log::LevelFilter::Debug);
+        assert_eq!(
+            parse_log_level(args.into_iter()),
+            Some(log::LevelFilter::Debug)
+        );
     }
 
     #[test]
     fn log_level_equals() {
         let args = vec!["prog".to_string(), "--log-level=error".to_string()];
-        assert_eq!(parse_log_level(args.into_iter()), log::LevelFilter::Error);
+        assert_eq!(
+            parse_log_level(args.into_iter()),
+            Some(log::LevelFilter::Error)
+        );
+    }
+
+    #[test]
+    fn log_level_none() {
+        let args = vec!["prog".to_string()];
+        assert_eq!(parse_log_level(args.into_iter()), None);
     }
 }

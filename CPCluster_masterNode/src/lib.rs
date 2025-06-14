@@ -397,8 +397,12 @@ pub async fn run(config_path: &str, join_path: &str) -> Result<(), Box<dyn Error
 }
 
 pub async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Info)
-        .init();
+    let config = Config::load("config.json").unwrap_or_default();
+    let level = config
+        .log_level
+        .as_deref()
+        .and_then(|l| l.parse().ok())
+        .unwrap_or(log::LevelFilter::Info);
+    env_logger::Builder::new().filter_level(level).init();
     run("config.json", "join.json").await
 }
