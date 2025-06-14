@@ -65,17 +65,9 @@ pub async fn execute_node_task(
     internet: Option<&InternetPorts>,
 ) -> TaskResult {
     match task {
-        Task::Compute { expression } => match meval::eval_str(&expression) {
-            Ok(v) => TaskResult::Number(v),
-            Err(e) => TaskResult::Error(e.to_string()),
-        },
-        Task::HttpRequest { url } => match client.get(&url).send().await {
-            Ok(resp) => match resp.text().await {
-                Ok(text) => TaskResult::Response(text),
-                Err(e) => TaskResult::Error(e.to_string()),
-            },
-            Err(e) => TaskResult::Error(e.to_string()),
-        },
+        t @ Task::Compute { .. } | t @ Task::HttpRequest { .. } => {
+            cpcluster_common::execute_task(t, client).await
+        }
         Task::Tcp { addr, data } => {
             let connect_res = if let Some(inet) = internet.and_then(|i| i.tcp_port()) {
                 let socket = TcpSocket::new_v4().map_err(|e| TaskResult::Error(e.to_string()));
