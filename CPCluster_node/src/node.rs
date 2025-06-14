@@ -8,7 +8,7 @@ use cpcluster_common::{
 use log::{error, info, warn};
 use reqwest::Client;
 use rustls_native_certs as native_certs;
-use std::{collections::HashMap, error::Error, fs, sync::Arc};
+use std::{collections::HashMap, error::Error, fs, io, sync::Arc};
 use tokio::sync::Mutex;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -230,7 +230,12 @@ fn build_tls_config(
             })?;
         }
     } else if let Some(path) = ca_path {
-        let mut pem = std::io::BufReader::new(fs::File::open(path)?);
+        let mut pem = std::io::BufReader::new(fs::File::open(path).map_err(|e| {
+            io::Error::new(
+                e.kind(),
+                format!("failed to open CA certificate '{}': {}", path, e),
+            )
+        })?);
         for cert in rustls_pemfile::certs(&mut pem)? {
             root_store.add(&rustls::Certificate(cert)).map_err(|e| {
                 std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{:?}", e))

@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::fs;
+use std::{fs, io};
 
 use rcgen::generate_simple_self_signed;
 use tokio_rustls::rustls;
@@ -10,8 +10,18 @@ pub fn load_or_generate_tls_config(
     host: &str,
 ) -> Result<rustls::ServerConfig, Box<dyn Error + Send + Sync>> {
     if std::path::Path::new(cert_path).exists() && std::path::Path::new(key_path).exists() {
-        let mut cert_file = std::io::BufReader::new(fs::File::open(cert_path)?);
-        let mut key_file = std::io::BufReader::new(fs::File::open(key_path)?);
+        let mut cert_file = std::io::BufReader::new(fs::File::open(cert_path).map_err(|e| {
+            io::Error::new(
+                e.kind(),
+                format!("failed to open certificate file '{}': {}", cert_path, e),
+            )
+        })?);
+        let mut key_file = std::io::BufReader::new(fs::File::open(key_path).map_err(|e| {
+            io::Error::new(
+                e.kind(),
+                format!("failed to open key file '{}': {}", key_path, e),
+            )
+        })?);
         let certs = rustls_pemfile::certs(&mut cert_file)?
             .into_iter()
             .map(rustls::Certificate)
