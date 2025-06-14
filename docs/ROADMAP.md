@@ -20,3 +20,12 @@ This task combines the work for direct node connections, simple job execution an
    - Pending tasks are re-assigned to available nodes to ensure completion.
 
 Implementing this combined task provides functional node-to-node messaging, initial distributed computation and basic robustness against node failures.
+
+## Status
+
+- [x] Direct node connections
+- [x] Simple job execution
+- [x] Task failover
+
+All milestones above are implemented in the current code base. Further
+enhancements will be added as new roadmap items.
