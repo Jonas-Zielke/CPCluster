@@ -1,4 +1,4 @@
-use cpcluster_client::{execute_task, submit_and_wait};
+use cpcluster_client::{DEFAULT_TIMEOUT, execute_task, submit_and_wait};
 use cpcluster_common::{
     NodeMessage, Task, TaskResult, read_length_prefixed, write_length_prefixed,
 };
@@ -37,7 +37,9 @@ async fn submit_and_wait_returns_result() {
         expression: Cow::Borrowed("2+3"),
     };
 
-    let res = submit_and_wait(&mut client_stream, task).await.unwrap();
+    let res = submit_and_wait(&mut client_stream, task, Some(DEFAULT_TIMEOUT))
+        .await
+        .unwrap();
     server.await.unwrap();
     match res {
         TaskResult::Number(v) => assert!((v - 5.0).abs() < f64::EPSILON),
