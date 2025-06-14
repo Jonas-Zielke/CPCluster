@@ -4,7 +4,7 @@ use cpcluster_common::{
 };
 use log::info;
 use reqwest::Client;
-use std::{borrow::Cow, error::Error, fs};
+use std::{borrow::Cow, env, error::Error, fs};
 use tokio::net::TcpStream;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
@@ -52,7 +52,10 @@ async fn run_data_tests(stream: &mut TcpStream) -> Result<(), Box<dyn Error + Se
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     env_logger::init();
-    let join_info: JoinInfo = serde_json::from_str(&fs::read_to_string("join.json")?)?;
+    let mut join_info: JoinInfo = serde_json::from_str(&fs::read_to_string("join.json")?)?;
+    if let Ok(token) = env::var("CPCLUSTER_TOKEN") {
+        join_info.token = token;
+    }
     let addr = format!("{}:{}", join_info.ip, join_info.port);
     info!("Connecting to master at {}", addr);
     let mut stream = TcpStream::connect(&addr).await?;
