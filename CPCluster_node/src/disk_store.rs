@@ -1,6 +1,5 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio::fs;
-use tokio::task::spawn_blocking;
 
 #[derive(Clone)]
 pub struct DiskStore {
@@ -46,36 +45,21 @@ impl DiskStore {
     }
 }
 
-fn directory_size(path: &Path) -> std::io::Result<u64> {
-    if !path.exists() {
-        return Ok(0);
-    }
-    let mut size = 0;
-    for entry in std::fs::read_dir(path)? {
-        let entry = entry?;
-        let meta = entry.metadata()?;
-        if meta.is_file() {
-            size += meta.len();
-        } else if meta.is_dir() {
-            size += directory_size(&entry.path())?;
-        }
-    }
-    Ok(size)
-}
-
 async fn directory_size_async(path: PathBuf) -> std::io::Result<u64> {
     if !fs::try_exists(&path).await? {
         return Ok(0);
     }
     let mut size = 0u64;
-    let mut dir = fs::read_dir(&path).await?;
-    while let Some(entry) = dir.next_entry().await? {
-        let meta = entry.metadata().await?;
-        if meta.is_file() {
-            size += meta.len();
-        } else if meta.is_dir() {
-            let sub = entry.path();
-            size += spawn_blocking(move || directory_size(&sub)).await??;
+    let mut stack = vec![path];
+    while let Some(dir_path) = stack.pop() {
+        let mut dir = fs::read_dir(dir_path).await?;
+        while let Some(entry) = dir.next_entry().await? {
+            let meta = entry.metadata().await?;
+            if meta.is_file() {
+                size += meta.len();
+            } else if meta.is_dir() {
+                stack.push(entry.path());
+            }
         }
     }
     Ok(size)
