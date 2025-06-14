@@ -309,7 +309,7 @@ where
     Ok(())
 }
 
-pub async fn run(config_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn run(config_path: &str, join_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     env_logger::init();
     let config = Config::load(config_path).unwrap_or_default();
     config.save(config_path)?;
@@ -327,8 +327,8 @@ pub async fn run(config_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> 
         ip: ip.clone(),
         port,
     };
-    fs::write("join.json", serde_json::to_string_pretty(&join_info)?)?;
-    info!("Join information saved to join.json");
+    fs::write(join_path, serde_json::to_string_pretty(&join_info)?)?;
+    info!("Join information saved to {}", join_path);
     let listener = TcpListener::bind((ip.as_str(), port)).await?;
     info!("Master Node listening on {}:{}", ip, port);
     let cert_path = config
@@ -396,5 +396,5 @@ pub async fn run(config_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> 
 }
 
 pub async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    run("config.json").await
+    run("config.json", "join.json").await
 }
