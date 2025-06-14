@@ -379,7 +379,12 @@ pub async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                             error!("TLS connection error: {:?}", e);
                         }
                     }
-                    Err(e) => error!("TLS accept failed: {:?}", e),
+                    Err(e) => error!(
+                        "TLS accept from {} failed (kind: {:?}): {}",
+                        addr,
+                        e.kind(),
+                        e
+                    ),
                 }
             } else if let Err(e) =
                 handle_connection(stream, master_node, token, addr.to_string()).await
