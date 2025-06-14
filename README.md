@@ -23,6 +23,14 @@ For an overview of the repository structure see docs/PROJECT_OVERVIEW.md.
 
 ## Getting Started
 
+### Supported Environments
+
+The project is primarily developed on Linux and macOS. The provided
+`setup_container.sh` script detects common package managers (`apt`, `dnf`, `yum`,
+`pacman` and `brew`) to install prerequisites automatically. On other platforms
+or when detection fails, install `curl`, `git`, a C toolchain, `pkg-config` and
+OpenSSL development libraries manually before building.
+
 ### Prerequisites
 
 - [Rust](https://www.rust-lang.org/) programming language
@@ -38,10 +46,10 @@ For an overview of the repository structure see docs/PROJECT_OVERVIEW.md.
    ```
 
    You can run `./setup_container.sh` from the repository root to install Rust
-   and all required packages automatically. The script detects a supported
-   package manager (e.g. `apt`, `dnf`, `yum`), installs dependencies and builds
-   both crates. If no known package manager is found you will need to install
-   `curl`, `git`, `build-essential`, `pkg-config` and `libssl-dev` manually
+   and all required packages automatically. The script detects common package
+   managers (`apt`, `dnf`, `yum`, `pacman`, `brew`), installs dependencies and
+   builds the crates. If your system uses a different manager, install `curl`,
+   `git`, a C toolchain, `pkg-config` and OpenSSL development libraries manually
    before running the script.
 
 2. **Navigate to each project**:
