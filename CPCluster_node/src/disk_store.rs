@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use tokio::fs;
+use tokio::task::spawn_blocking;
 
 #[derive(Clone)]
 pub struct DiskStore {
@@ -17,7 +18,7 @@ impl DiskStore {
 
     pub async fn store(&self, id: String, data: Vec<u8>) -> std::io::Result<()> {
         fs::create_dir_all(&self.dir).await?;
-        let usage = directory_size(&self.dir)?;
+        let usage = directory_size_async(self.dir.clone()).await?;
         if usage + data.len() as u64 > self.quota_bytes {
             return Err(std::io::Error::other("quota exceeded"));
         }
@@ -39,7 +40,7 @@ impl DiskStore {
                 entries.push((entry.file_name().to_string_lossy().to_string(), meta.len()));
             }
         }
-        let used = directory_size(&self.dir)?;
+        let used = directory_size_async(self.dir.clone()).await?;
         let free = self.quota_bytes.saturating_sub(used);
         Ok((entries, free))
     }
@@ -57,6 +58,24 @@ fn directory_size(path: &Path) -> std::io::Result<u64> {
             size += meta.len();
         } else if meta.is_dir() {
             size += directory_size(&entry.path())?;
+        }
+    }
+    Ok(size)
+}
+
+async fn directory_size_async(path: PathBuf) -> std::io::Result<u64> {
+    if !fs::try_exists(&path).await? {
+        return Ok(0);
+    }
+    let mut size = 0u64;
+    let mut dir = fs::read_dir(&path).await?;
+    while let Some(entry) = dir.next_entry().await? {
+        let meta = entry.metadata().await?;
+        if meta.is_file() {
+            size += meta.len();
+        } else if meta.is_dir() {
+            let sub = entry.path();
+            size += spawn_blocking(move || directory_size(&sub)).await??;
         }
     }
     Ok(size)
