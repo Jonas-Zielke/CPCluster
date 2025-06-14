@@ -64,3 +64,11 @@ pub async fn save_state(master: &MasterNode) {
         let _ = tokio::fs::write(&master.state_file, data).await;
     }
 }
+
+/// Write the master state to disk asynchronously without blocking the caller.
+pub fn spawn_save_state(master: &Arc<MasterNode>) {
+    let m = Arc::clone(master);
+    tokio::spawn(async move {
+        save_state(&m).await;
+    });
+}

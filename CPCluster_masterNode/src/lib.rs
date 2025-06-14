@@ -19,12 +19,12 @@ pub mod state;
 pub mod tls;
 
 use shell::run_shell;
-use state::{load_state, save_state, MasterNode, NodeInfo};
+use state::{load_state, save_state, spawn_save_state, MasterNode, NodeInfo};
 use tls::load_or_generate_tls_config;
 
 async fn send_pending_tasks<S>(
     socket: &mut S,
-    master: &MasterNode,
+    master: &Arc<MasterNode>,
     addr: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
@@ -91,18 +91,18 @@ fn generate_token() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-async fn allocate_port(master_node: &MasterNode) -> Option<u16> {
+async fn allocate_port(master_node: &Arc<MasterNode>) -> Option<u16> {
     let port = {
         let mut ports = master_node.available_ports.lock().await;
         ports.pop_front()
     };
     if port.is_some() {
-        save_state(master_node).await;
+        spawn_save_state(master_node);
     }
     port
 }
 
-async fn release_port(master_node: &MasterNode, addr: String) {
+async fn release_port(master_node: &Arc<MasterNode>, addr: String) {
     let port = {
         let mut nodes = master_node.connected_nodes.lock().await;
         nodes.get_mut(&addr).and_then(|info| info.port.take())
@@ -110,7 +110,7 @@ async fn release_port(master_node: &MasterNode, addr: String) {
     if let Some(p) = port {
         master_node.available_ports.lock().await.push_back(p);
     }
-    save_state(master_node).await;
+    spawn_save_state(master_node);
 }
 
 fn now_ms() -> u64 {
@@ -120,7 +120,7 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-async fn cleanup_dead_nodes(master: &MasterNode) {
+async fn cleanup_dead_nodes(master: &Arc<MasterNode>) {
     let timeout = master.failover_timeout_ms * 2;
     let now = now_ms();
     let mut stale = Vec::new();
@@ -143,7 +143,7 @@ async fn cleanup_dead_nodes(master: &MasterNode) {
         }
         release_port(master, addr.clone()).await;
     }
-    save_state(master).await;
+    spawn_save_state(master);
 }
 
 async fn handle_connection<S>(
@@ -171,7 +171,7 @@ where
                 role: cpcluster_common::NodeRole::Worker,
             },
         );
-        save_state(&master_node).await;
+        spawn_save_state(&master_node);
         if let Err(e) = send_pending_tasks(&mut socket, &master_node, &addr).await {
             error!("Failed to send pending tasks: {}", e);
         }
@@ -239,7 +239,7 @@ where
                         .lock()
                         .await
                         .insert(id.clone(), task);
-                    save_state(&master_node).await;
+                    spawn_save_state(&master_node);
                     let ack = serde_json::to_vec(&NodeMessage::TaskAccepted(id))?;
                     write_length_prefixed(&mut socket, &ack).await?;
                 }
@@ -259,7 +259,7 @@ where
                     info!("Node disconnected and port released.");
                     release_port(&master_node, addr.clone()).await;
                     master_node.connected_nodes.lock().await.remove(&addr);
-                    save_state(&master_node).await;
+                    spawn_save_state(&master_node);
                     break;
                 }
                 NodeMessage::Heartbeat => {
@@ -291,7 +291,7 @@ where
                         .lock()
                         .await
                         .insert(id.clone(), result);
-                    save_state(&master_node).await;
+                    spawn_save_state(&master_node);
                 }
                 _ => warn!("Unknown request"),
             }
@@ -300,7 +300,7 @@ where
             }
         }
         master_node.connected_nodes.lock().await.remove(&addr);
-        save_state(&master_node).await;
+        spawn_save_state(&master_node);
     } else {
         warn!("Client provided an invalid token {}", received_token);
         write_length_prefixed(&mut socket, b"Invalid token").await?;
@@ -364,7 +364,8 @@ pub async fn run(config_path: &str, join_path: &str) -> Result<(), Box<dyn Error
         }
     });
     loop {
-        let (stream, addr) = listener.accept().await?;
+        let (mut stream, addr) = listener.accept().await?;
+        let _ = stream.set_nodelay(true);
         let master_node = Arc::clone(&master_node);
         let token = token.clone();
         let acceptor = tls_acceptor.clone();
