@@ -31,7 +31,7 @@ async fn submit_task_and_wait(
 
 pub fn run_shell(master: Arc<MasterNode>, rt: Handle) {
     use std::io::{self, BufRead, Write};
-    println!("CPCluster shell ready.\nCommands:\n  nodes                - list connected nodes\n  tasks                - list active and pending tasks\n  task <id>           - show status or result of a task\n  addtask <type> <arg> - queue a task (type: compute|http)\n  getglobalram         - show memory usage of a worker\n  getstorage           - show disk usage of a disk node\n  exit                 - quit");
+    println!("CPCluster shell ready.\nCommands:\n  nodes                - list connected nodes with their role\n  tasks                - list active and pending tasks\n  task <id>           - show status or result of a task\n  addtask <type> <arg> - queue a task (type: compute|http)\n  getglobalram         - show memory usage of a worker\n  getstorage           - show disk usage of a disk node\n  exit                 - quit");
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
     print!("> ");
@@ -45,8 +45,8 @@ pub fn run_shell(master: Arc<MasterNode>, rt: Handle) {
                     if nodes.is_empty() {
                         println!("No connected nodes");
                     } else {
-                        for addr in nodes.keys() {
-                            println!("{}", addr);
+                        for (addr, info) in nodes.iter() {
+                            println!("{} ({:?})", addr, info.role);
                         }
                     }
                 }
