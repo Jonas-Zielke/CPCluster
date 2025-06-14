@@ -24,6 +24,7 @@ pub struct MasterNode {
     pub failover_timeout_ms: u64,
     pub pending_tasks: Arc<Mutex<HashMap<String, Task>>>,
     pub completed_tasks: Arc<Mutex<HashMap<String, TaskResult>>>,
+    pub state_file: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -36,7 +37,7 @@ struct MasterState {
 }
 
 pub async fn load_state(master: &MasterNode) {
-    if let Ok(data) = tokio::fs::read_to_string("master_state.json").await {
+    if let Ok(data) = tokio::fs::read_to_string(&master.state_file).await {
         if let Ok(state) = serde_json::from_str::<MasterState>(&data) {
             *master.connected_nodes.lock().await = state.connected_nodes;
             *master.available_ports.lock().await = state.available_ports.into_iter().collect();
@@ -60,6 +61,6 @@ pub async fn save_state(master: &MasterNode) {
         completed_tasks: master.completed_tasks.lock().await.clone(),
     };
     if let Ok(data) = serde_json::to_string_pretty(&state) {
-        let _ = tokio::fs::write("master_state.json", data).await;
+        let _ = tokio::fs::write(&master.state_file, data).await;
     }
 }

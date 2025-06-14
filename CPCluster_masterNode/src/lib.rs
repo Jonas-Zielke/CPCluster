@@ -347,6 +347,7 @@ pub async fn run(config_path: &str, join_path: &str) -> Result<(), Box<dyn Error
         failover_timeout_ms: config.failover_timeout_ms,
         pending_tasks: Arc::new(Mutex::new(HashMap::new())),
         completed_tasks: Arc::new(Mutex::new(HashMap::new())),
+        state_file: config.state_file.clone(),
     });
     load_state(&master_node).await;
     let shell_master = Arc::clone(&master_node);

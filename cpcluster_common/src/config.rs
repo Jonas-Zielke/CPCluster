@@ -17,6 +17,8 @@ pub struct Config {
     /// Directory used for on-disk storage by nodes
     #[serde(default = "default_storage_dir")]
     pub storage_dir: String,
+    #[serde(default = "default_state_file")]
+    pub state_file: String,
     #[serde(default = "default_disk_space")]
     pub disk_space_mb: u64,
     #[serde(default)]
@@ -38,6 +40,7 @@ impl Default for Config {
             key_path: None,
             internet_ports: None,
             storage_dir: default_storage_dir(),
+            state_file: default_state_file(),
             disk_space_mb: default_disk_space(),
             role: NodeRole::Worker,
             max_retries: default_max_retries(),
@@ -70,4 +73,8 @@ fn default_disk_space() -> u64 {
 
 fn default_max_retries() -> u32 {
     5
+}
+
+fn default_state_file() -> String {
+    "master_state.json".to_string()
 }

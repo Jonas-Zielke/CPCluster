@@ -8,5 +8,6 @@
   "cert_path": null,
   "key_path": null,
   "storage_dir": "storage",
+  "state_file": "master_state.json",
   "max_retries": 5
 }
