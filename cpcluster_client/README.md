@@ -6,7 +6,7 @@ borrow string slices using `Cow`.
 
 ## Running
 
-1. Copy the `join.json` file created by the master node into this directory. Alternatively set the token via the `CPCLUSTER_TOKEN` environment variable.
+1. Copy the `join.json` file created by the master node into this directory. Alternatively set the token via the `CPCLUSTER_TOKEN` environment variable or use `CPCLUSTER_JOIN` to point to a custom file.
 2. Build the crate:
 
    ```bash

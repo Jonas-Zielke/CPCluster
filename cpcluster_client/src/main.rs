@@ -9,6 +9,10 @@ use tokio::net::TcpStream;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
+fn join_path() -> String {
+    env::var("CPCLUSTER_JOIN").unwrap_or_else(|_| "join.json".to_string())
+}
+
 async fn run_data_tests(stream: &mut TcpStream) -> Result<(), Box<dyn Error + Send + Sync>> {
     let compute_res = submit_and_wait(
         stream,
@@ -52,7 +56,8 @@ async fn run_data_tests(stream: &mut TcpStream) -> Result<(), Box<dyn Error + Se
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     env_logger::init();
-    let mut join_info: JoinInfo = serde_json::from_str(&fs::read_to_string("join.json")?)?;
+    let path = join_path();
+    let mut join_info: JoinInfo = serde_json::from_str(&fs::read_to_string(&path)?)?;
     if let Ok(token) = env::var("CPCLUSTER_TOKEN") {
         join_info.token = token;
     }
