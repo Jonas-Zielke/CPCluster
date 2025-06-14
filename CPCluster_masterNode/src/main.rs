@@ -11,7 +11,7 @@ fn parse_config_path<I: Iterator<Item = String>>(mut args: I) -> String {
 fn parse_log_level<I: Iterator<Item = String>>(mut args: I) -> log::LevelFilter {
     args.next();
     let mut expect_level = false;
-    while let Some(arg) = args.next() {
+    for arg in args {
         if expect_level {
             return arg.parse().unwrap_or(log::LevelFilter::Info);
         }
