@@ -17,9 +17,11 @@ async fn connect_with_backoff() {
         ip: "127.0.0.1".into(),
         port,
     };
-    let mut config = Config::default();
-    config.master_addresses = vec![addr.clone()];
-    config.max_retries = 5;
+    let config = Config {
+        master_addresses: vec![addr.clone()],
+        max_retries: 5,
+        ..Default::default()
+    };
 
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(200)).await;
