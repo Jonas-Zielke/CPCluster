@@ -1,5 +1,5 @@
 use cpcluster_common::{Task, TaskResult};
-use cpcluster_node::{execute_task, memory_store::MemoryStore};
+use cpcluster_node::{execute_node_task, memory_store::MemoryStore};
 use reqwest::Client;
 use tempfile::tempdir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -18,7 +18,7 @@ async fn tcp_and_udp_tasks() -> Result<(), Box<dyn std::error::Error + Send + Sy
     });
     let client = Client::new();
     let store = MemoryStore::new();
-    let res = execute_task(
+    let res = execute_node_task(
         Task::Tcp {
             addr: tcp_addr.to_string(),
             data: b"hello".to_vec(),
@@ -41,7 +41,7 @@ async fn tcp_and_udp_tasks() -> Result<(), Box<dyn std::error::Error + Send + Sy
         assert_eq!(&buf[..n], b"ping");
         udp_socket.send_to(b"pong", &peer).await.expect("udp send");
     });
-    let res = execute_task(
+    let res = execute_node_task(
         Task::Udp {
             addr: udp_addr.to_string(),
             data: b"ping".to_vec(),
@@ -62,7 +62,7 @@ async fn complex_and_storage_tasks() -> Result<(), Box<dyn std::error::Error + S
     let client = Client::new();
     let store = MemoryStore::new();
     // complex math
-    let res = execute_task(
+    let res = execute_node_task(
         Task::ComplexMath {
             expression: "1+2*i+(3-4*i)".into(),
         },
@@ -76,7 +76,7 @@ async fn complex_and_storage_tasks() -> Result<(), Box<dyn std::error::Error + S
     assert!(matches!(res, TaskResult::Response(ref s) if s.trim() == "4-2i"));
 
     // RAM store and retrieve
-    let res = execute_task(
+    let res = execute_node_task(
         Task::StoreData {
             key: "k".into(),
             data: b"data".to_vec(),
@@ -89,7 +89,7 @@ async fn complex_and_storage_tasks() -> Result<(), Box<dyn std::error::Error + S
     )
     .await;
     assert!(matches!(res, TaskResult::Stored));
-    let res = execute_task(
+    let res = execute_node_task(
         Task::RetrieveData { key: "k".into() },
         &client,
         "./",
@@ -108,7 +108,7 @@ async fn disk_tasks() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let path = dir.path().to_str().expect("path to str");
     let client = Client::new();
     let store = MemoryStore::new();
-    let res = execute_task(
+    let res = execute_node_task(
         Task::DiskWrite {
             path: "file.bin".into(),
             data: b"d".to_vec(),
@@ -121,7 +121,7 @@ async fn disk_tasks() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     )
     .await;
     assert!(matches!(res, TaskResult::Written));
-    let res = execute_task(
+    let res = execute_node_task(
         Task::DiskRead {
             path: "file.bin".into(),
         },
@@ -145,7 +145,7 @@ async fn disk_path_safety() -> Result<(), Box<dyn std::error::Error + Send + Syn
     let client = Client::new();
     let store = MemoryStore::new();
 
-    let res = execute_task(
+    let res = execute_node_task(
         Task::DiskWrite {
             path: "../evil.txt".into(),
             data: b"x".to_vec(),
@@ -159,7 +159,7 @@ async fn disk_path_safety() -> Result<(), Box<dyn std::error::Error + Send + Syn
     .await;
     assert!(matches!(res, TaskResult::Error(_)));
 
-    let res = execute_task(
+    let res = execute_node_task(
         Task::DiskRead {
             path: "../evil.txt".into(),
         },
