@@ -45,6 +45,7 @@ Important configuration fields include:
 - `disk_space_mb` – quota for disk nodes.
 - `role` – choose `Worker`, `Disk` or `Internet`.
 - `failover_timeout_ms` and `master_addresses` – reconnection behaviour.
+- `max_retries` – limit for connection attempts when (re)joining the master.
 - `internet_ports` – list of ports bound by Internet nodes.
 
 `cpcluster_common::Task` includes variants such as `Tcp`, `Udp`, `ComplexMath`, `StoreData`, `RetrieveData`, `DiskWrite`, `DiskRead`, `GetGlobalRam` and `GetStorage` in addition to compute and HTTP requests.

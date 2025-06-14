@@ -24,43 +24,54 @@ pub async fn run(join_info: JoinInfo, config: Config) -> Result<(), Box<dyn Erro
     heartbeat_loop(stream, join_info, config).await
 }
 
-async fn connect_to_master(
+pub async fn connect_to_master(
     join_info: &JoinInfo,
     config: &Config,
 ) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
-    for addr in &config.master_addresses {
-        match connect(
-            addr,
-            is_local_ip(&join_info.ip),
-            &join_info.ip,
-            config.ca_cert_path.as_deref(),
-            config.ca_cert.as_deref(),
-        )
-        .await
-        {
-            Ok(mut s) => {
-                info!("Connected to Master Node at {}", addr);
-                write_length_prefixed(&mut s, join_info.token.as_bytes()).await?;
-                let auth_response = read_length_prefixed(&mut s).await?;
-                if auth_response == b"Invalid token" {
-                    error!("Authentication failed");
-                    continue;
-                }
-                send_message(&mut s, NodeMessage::RegisterRole(config.role.clone())).await?;
-                send_message(&mut s, NodeMessage::GetConnectedNodes).await?;
-                if let Ok(buf) = read_length_prefixed(&mut s).await {
-                    if let Ok(NodeMessage::ConnectedNodes(nodes)) = serde_json::from_slice(&buf) {
-                        info!("Currently connected nodes in the network: {:?}", nodes);
-                        if let Some(peer) = nodes.first() {
-                            send_message(&mut s, NodeMessage::RequestConnection(peer.clone()))
-                                .await?;
+    let mut attempt = 0;
+    let mut delay = std::time::Duration::from_millis(100);
+    loop {
+        for addr in &config.master_addresses {
+            match connect(
+                addr,
+                is_local_ip(&join_info.ip),
+                &join_info.ip,
+                config.ca_cert_path.as_deref(),
+                config.ca_cert.as_deref(),
+            )
+            .await
+            {
+                Ok(mut s) => {
+                    info!("Connected to Master Node at {}", addr);
+                    write_length_prefixed(&mut s, join_info.token.as_bytes()).await?;
+                    let auth_response = read_length_prefixed(&mut s).await?;
+                    if auth_response == b"Invalid token" {
+                        error!("Authentication failed");
+                        continue;
+                    }
+                    send_message(&mut s, NodeMessage::RegisterRole(config.role.clone())).await?;
+                    send_message(&mut s, NodeMessage::GetConnectedNodes).await?;
+                    if let Ok(buf) = read_length_prefixed(&mut s).await {
+                        if let Ok(NodeMessage::ConnectedNodes(nodes)) = serde_json::from_slice(&buf)
+                        {
+                            info!("Currently connected nodes in the network: {:?}", nodes);
+                            if let Some(peer) = nodes.first() {
+                                send_message(&mut s, NodeMessage::RequestConnection(peer.clone()))
+                                    .await?;
+                            }
                         }
                     }
+                    return Ok(s);
                 }
-                return Ok(s);
+                Err(e) => warn!("Failed to connect to {}: {}", addr, e),
             }
-            Err(e) => warn!("Failed to connect to {}: {}", addr, e),
         }
+        attempt += 1;
+        if attempt > config.max_retries {
+            break;
+        }
+        tokio::time::sleep(delay).await;
+        delay *= 2;
     }
     Err(Box::new(std::io::Error::other(
         "Unable to connect to any master node",
@@ -247,46 +258,57 @@ fn build_tls_config(
         .with_no_client_auth())
 }
 
-async fn reconnect(
+pub async fn reconnect(
     join_info: &JoinInfo,
     config: &Config,
     open_tasks: &Arc<Mutex<HashMap<String, NodeMessage>>>,
 ) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
-    for addr in &config.master_addresses {
-        match connect(
-            addr,
-            is_local_ip(&join_info.ip),
-            &join_info.ip,
-            config.ca_cert_path.as_deref(),
-            config.ca_cert.as_deref(),
-        )
-        .await
-        {
-            Ok(mut s) => {
-                info!("Reconnected to Master Node at {}", addr);
-                write_length_prefixed(&mut s, join_info.token.as_bytes()).await?;
-                let auth_resp = read_length_prefixed(&mut s).await?;
-                if auth_resp == b"Invalid token" {
-                    error!("Authentication failed during reconnect");
-                    continue;
-                }
-                if let Err(e) = send_message(&mut s, NodeMessage::GetConnectedNodes).await {
-                    warn!("Failed to request connected nodes: {}", e);
-                } else if let Ok(buf) = read_length_prefixed(&mut s).await {
-                    if let Ok(NodeMessage::ConnectedNodes(nodes)) = serde_json::from_slice(&buf) {
-                        info!("Currently connected nodes in the network: {:?}", nodes);
+    let mut attempt = 0;
+    let mut delay = std::time::Duration::from_millis(100);
+    loop {
+        for addr in &config.master_addresses {
+            match connect(
+                addr,
+                is_local_ip(&join_info.ip),
+                &join_info.ip,
+                config.ca_cert_path.as_deref(),
+                config.ca_cert.as_deref(),
+            )
+            .await
+            {
+                Ok(mut s) => {
+                    info!("Reconnected to Master Node at {}", addr);
+                    write_length_prefixed(&mut s, join_info.token.as_bytes()).await?;
+                    let auth_resp = read_length_prefixed(&mut s).await?;
+                    if auth_resp == b"Invalid token" {
+                        error!("Authentication failed during reconnect");
+                        continue;
                     }
-                }
-                let tasks = open_tasks.lock().await.clone();
-                for task in tasks.values() {
-                    if let Err(e) = send_message(&mut s, task.clone()).await {
-                        warn!("Failed to resend task: {}", e);
+                    if let Err(e) = send_message(&mut s, NodeMessage::GetConnectedNodes).await {
+                        warn!("Failed to request connected nodes: {}", e);
+                    } else if let Ok(buf) = read_length_prefixed(&mut s).await {
+                        if let Ok(NodeMessage::ConnectedNodes(nodes)) = serde_json::from_slice(&buf)
+                        {
+                            info!("Currently connected nodes in the network: {:?}", nodes);
+                        }
                     }
+                    let tasks = open_tasks.lock().await.clone();
+                    for task in tasks.values() {
+                        if let Err(e) = send_message(&mut s, task.clone()).await {
+                            warn!("Failed to resend task: {}", e);
+                        }
+                    }
+                    return Ok(s);
                 }
-                return Ok(s);
+                Err(e) => warn!("Failed to connect to {}: {}", addr, e),
             }
-            Err(e) => warn!("Failed to connect to {}: {}", addr, e),
         }
+        attempt += 1;
+        if attempt > config.max_retries {
+            break;
+        }
+        tokio::time::sleep(delay).await;
+        delay *= 2;
     }
     Err(Box::new(std::io::Error::other(
         "Unable to reconnect to any master node",
