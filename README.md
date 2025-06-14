@@ -9,7 +9,7 @@ The development roadmap lives in `docs/ROADMAP.md` and changes are tracked in
 ## Features
 
 - **Centralized Connection Management**: The master node manages node connections and assigns direct ports for inter-node communication.
-- **Dynamic Port Assignment**: Nodes request connections to other nodes through the master, which assigns available ports in the configurable range defined in `config.json`.
+- **Dynamic Port Assignment**: Nodes request connections to other nodes through the master, which assigns available ports in the configurable range defined in the configuration file (`config.json` by default).
 - **Direct Node-to-Node Communication**: Nodes establish direct communication channels after being connected, allowing efficient data transfer with minimal latency.
 - **Token-based Authentication**: Nodes authenticate with the master using a unique token stored in a `join.json` file.
  - **Disconnect Handling**: The master node manages disconnections and releases ports when nodes leave the network.
@@ -81,7 +81,7 @@ OpenSSL development libraries manually before building.
 1. **Generate join.json**: When the master node is started, it creates a `join.json` file with a unique token for network access.
 2. **Securely distribute `join.json`**: Restrict file permissions and use an encrypted channel when copying the file. You can also set the token via the `CPCLUSTER_TOKEN` environment variable to avoid storing it on disk.
 3. **Copy `join.json` to nodes**: If not using the environment variable, each node must have a `join.json` file identical to the one in the master node directory. Copy this file to the `CPCluster_node` directory for each node that will join the network.
-4. **Edit `config.json`**: Both master and nodes read runtime options from `config.json`. You can configure the port range, failover timeout, master addresses and TLS certificates. Additional fields include `role` (`Worker`, `Disk`, `Internet`), `storage_dir`, `disk_space_mb` and `internet_ports`.
+4. **Edit `config.json`**: Both master and nodes read runtime options from `config.json` by default. You can pass a different file as the first command line argument. The configuration lets you tune the port range, failover timeout, master addresses and TLS certificates. Additional fields include `role` (`Worker`, `Disk`, `Internet`), `storage_dir`, `disk_space_mb` and `internet_ports`.
 5. **Generate TLS certificates (optional)**: To secure traffic between nodes and the master, create a certificate for the master node and distribute it to all nodes:
    ```bash
    openssl req -x509 -newkey rsa:4096 -nodes -keyout master_key.pem \
@@ -95,17 +95,17 @@ OpenSSL development libraries manually before building.
 1. **Start the Master Node**:
    ```bash
    cd CPCluster_masterNode
-   cargo run
+   cargo run -- <config-path>
    ```
-   The master node listens on port **55000** and manages all connection requests from nodes.
+   Replace `<config-path>` with the path to your configuration file if it is not `config.json`. The master node listens on port **55000** and manages all connection requests from nodes.
 
 2. **Start Normal Nodes**:
    For each node instance:
    ```bash
    cd CPCluster_node
-   cargo run
+   cargo run -- <config-path>
    ```
-   The node connects to the master, requests the list of currently connected nodes, and can initiate direct connections to other nodes.
+   Use `<config-path>` to specify a custom configuration file if needed. The node connects to the master, requests the list of currently connected nodes, and can initiate direct connections to other nodes.
 
 ### Example Workflow
 

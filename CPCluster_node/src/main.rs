@@ -3,6 +3,10 @@ use cpcluster_common::JoinInfo;
 use cpcluster_node::node::run;
 use std::{env, error::Error, fs, io};
 
+fn parse_config_path<I: Iterator<Item = String>>(mut args: I) -> String {
+    args.nth(1).unwrap_or_else(|| "config.json".to_string())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     env_logger::init();
@@ -12,6 +16,24 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Ok(token) = env::var("CPCLUSTER_TOKEN") {
         join_info.token = token;
     }
-    let config = Config::load("config.json").unwrap_or_default();
+    let config_path = parse_config_path(env::args());
+    let config = Config::load(&config_path).unwrap_or_default();
     run(join_info, config).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_config_path;
+
+    #[test]
+    fn default_path() {
+        let args = vec!["prog".to_string()];
+        assert_eq!(parse_config_path(args.into_iter()), "config.json");
+    }
+
+    #[test]
+    fn custom_path() {
+        let args = vec!["prog".to_string(), "alt.json".to_string()];
+        assert_eq!(parse_config_path(args.into_iter()), "alt.json");
+    }
 }

@@ -21,9 +21,9 @@ Key components:
 
 The master stores connected nodes together with the timestamp of their last heartbeat. A background task periodically cleans up nodes that stop sending heartbeats. Available ports are tracked in a `HashSet`, both collections protected by `Mutex`.
 
-`generate_tls_config()` in the master builds a self-signed certificate used when clients connect from outside a local network. Nodes rely on `is_local_ip()` from `cpcluster_common` to decide whether TLS should be enabled. Alternatively you can supply your own certificate using `cert_path` and `key_path` in `config.json` and distribute the public certificate to nodes via `ca_cert_path`.
+`generate_tls_config()` in the master builds a self-signed certificate used when clients connect from outside a local network. Nodes rely on `is_local_ip()` from `cpcluster_common` to decide whether TLS should be enabled. Alternatively you can supply your own certificate using `cert_path` and `key_path` in the configuration file and distribute the public certificate to nodes via `ca_cert_path`.
 
-Nodes periodically send heartbeats. If one fails, the failover timeout defined in `config.json` determines when the master removes it. Nodes try each configured master address when reconnecting so another master can take over.
+Nodes periodically send heartbeats. If one fails, the failover timeout defined in the configuration determines when the master removes it. Nodes try each configured master address when reconnecting so another master can take over.
 
 ## Node overview
 
@@ -33,7 +33,7 @@ Nodes periodically send heartbeats. If one fails, the failover timeout defined i
 
 ### Node roles and configuration
 
-Nodes can operate in different roles defined in `config.json`:
+Nodes can operate in different roles defined in the configuration file (default `config.json`):
 
 - `Worker` – default mode executing tasks purely in memory.
 - `Disk` – persists data in `storage_dir` with a `disk_space_mb` quota.
@@ -72,7 +72,7 @@ The master writes a `join.json` file containing the authentication token. Becaus
    ```
 4. Build the entire workspace once using `cargo build --workspace`.
 5. Run nodes separately in different terminals with `cargo run`.
-6. Runtime options such as port ranges or master addresses are loaded from `config.json` via the `Config` helper in `cpcluster_common`.
+6. Runtime options such as port ranges or master addresses are loaded from a configuration file via the `Config` helper in `cpcluster_common`. The path defaults to `config.json` but can be supplied as the first command line argument when running the binaries.
 
 ## Additional documentation
 
