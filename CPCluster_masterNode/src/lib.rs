@@ -309,7 +309,6 @@ where
 }
 
 pub async fn run(config_path: &str, join_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
-    env_logger::init();
     let config = Config::load(config_path).unwrap_or_default();
     config.save(config_path)?;
     let token = generate_token();
@@ -398,5 +397,8 @@ pub async fn run(config_path: &str, join_path: &str) -> Result<(), Box<dyn Error
 }
 
 pub async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .init();
     run("config.json", "join.json").await
 }

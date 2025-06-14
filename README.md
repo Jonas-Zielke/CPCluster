@@ -105,18 +105,20 @@ OpenSSL development libraries manually before building.
 
 1. **Start the Master Node**:
    ```bash
-   cd CPCluster_masterNode
-   cargo run -- <config-path>
-   ```
-   Replace `<config-path>` with the path to your configuration file if it is not `config.json`. The master node listens on port **55000** and manages all connection requests from nodes.
+    cd CPCluster_masterNode
+    cargo run -- <config-path> [--log-level <level>]
+    ```
+    Replace `<config-path>` with the path to your configuration file if it is not `config.json`. The master node listens on port **55000** and manages all connection requests from nodes.
+   The `--log-level` flag controls verbosity (`error`, `warn`, `info`, `debug`, `trace`).
 
 2. **Start Normal Nodes**:
    For each node instance:
    ```bash
    cd CPCluster_node
-   cargo run -- <config-path>
+   cargo run -- <config-path> [--log-level <level>]
    ```
    Use `<config-path>` to specify a custom configuration file if needed. The node connects to the master, requests the list of currently connected nodes, and can initiate direct connections to other nodes.
+   The `--log-level` flag controls verbosity in the same way as for the master.
 
 ### Example Workflow
 
