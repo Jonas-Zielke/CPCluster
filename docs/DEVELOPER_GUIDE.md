@@ -57,6 +57,7 @@ The master writes a `join.json` file containing the authentication token. Becaus
 - Restrict read permissions so only the intended user can access the file.
 - Copy it over an encrypted channel or encrypt it before transfer (e.g. with `gpg`).
 - Alternatively set the token via the `CPCLUSTER_TOKEN` environment variable or use a secrets manager, keeping only the IP and port in `join.json`.
+- Set `CPCLUSTER_JOIN` on both master and nodes to change where `join.json` is written and read.
 ## Contribution hints
 
 
