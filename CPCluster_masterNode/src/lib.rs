@@ -1,5 +1,5 @@
 use cpcluster_common::config::Config;
-use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage};
+use cpcluster_common::{JoinInfo, NodeMessage, is_local_ip};
 use cpcluster_common::{read_length_prefixed, write_length_prefixed};
 use log::{error, info, warn};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -14,7 +14,7 @@ pub mod state;
 pub mod tls;
 
 use shell::run_shell;
-use state::{load_state, save_state, MasterNode, NodeInfo};
+use state::{MasterNode, NodeInfo, load_state, save_state};
 use tls::load_or_generate_tls_config;
 
 async fn send_pending_tasks<S>(
@@ -347,6 +347,7 @@ pub async fn run(config_path: &str, join_path: &str) -> Result<(), Box<dyn Error
         failover_timeout_ms: config.failover_timeout_ms,
         pending_tasks: Arc::new(Mutex::new(HashMap::new())),
         completed_tasks: Arc::new(Mutex::new(HashMap::new())),
+        state_file: config.state_file.clone(),
     });
     load_state(&master_node).await;
     let shell_master = Arc::clone(&master_node);
