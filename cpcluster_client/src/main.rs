@@ -1,4 +1,4 @@
-use cpcluster_client::{execute_task, submit_and_wait};
+use cpcluster_client::{DEFAULT_TIMEOUT, execute_task, submit_and_wait};
 use cpcluster_common::{
     JoinInfo, NodeMessage, Task, TaskResult, read_length_prefixed, write_length_prefixed,
 };
@@ -19,6 +19,7 @@ async fn run_data_tests(stream: &mut TcpStream) -> Result<(), Box<dyn Error + Se
         Task::Compute {
             expression: Cow::Borrowed("1+1"),
         },
+        Some(DEFAULT_TIMEOUT),
     )
     .await?;
 
@@ -34,6 +35,7 @@ async fn run_data_tests(stream: &mut TcpStream) -> Result<(), Box<dyn Error + Se
             key: mem_id.clone(),
             data: number.to_string().into_bytes(),
         },
+        Some(DEFAULT_TIMEOUT),
     )
     .await?;
 
@@ -45,6 +47,7 @@ async fn run_data_tests(stream: &mut TcpStream) -> Result<(), Box<dyn Error + Se
             path: disk_id.clone(),
             data: content.into_bytes(),
         },
+        Some(DEFAULT_TIMEOUT),
     )
     .await?;
 

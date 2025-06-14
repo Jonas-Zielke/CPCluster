@@ -2,7 +2,8 @@
 
 This crate provides a simple example client that submits compute tasks to the
 master node and waits for the result. It demonstrates how compute tasks can
-borrow string slices using `Cow`.
+borrow string slices using `Cow`. Each call to `submit_and_wait` accepts an
+optional timeout (default 5 seconds) so tasks won't block forever.
 
 ## Running
 
