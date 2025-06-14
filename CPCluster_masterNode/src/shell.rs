@@ -133,17 +133,35 @@ pub fn run_shell(master: Arc<MasterNode>, rt: Handle) {
                     }
                 }
                 "getglobalram" => {
-                    match rt.block_on(submit_task_and_wait(&master, Task::GetGlobalRam, 5000)) {
-                        Some(TaskResult::Response(r)) => println!("{}", r.trim()),
-                        Some(TaskResult::Error(e)) => println!("Error: {}", e),
-                        _ => println!("Failed to retrieve RAM stats"),
+                    let has_worker = master
+                        .connected_nodes
+                        .blocking_lock()
+                        .values()
+                        .any(|n| matches!(n.role, cpcluster_common::NodeRole::Worker));
+                    if !has_worker {
+                        println!("No worker nodes available");
+                    } else {
+                        match rt.block_on(submit_task_and_wait(&master, Task::GetGlobalRam, 5000)) {
+                            Some(TaskResult::Response(r)) => println!("{}", r.trim()),
+                            Some(TaskResult::Error(e)) => println!("Error: {}", e),
+                            _ => println!("Failed to retrieve RAM stats"),
+                        }
                     }
                 }
                 "getstorage" => {
-                    match rt.block_on(submit_task_and_wait(&master, Task::GetStorage, 5000)) {
-                        Some(TaskResult::Response(r)) => println!("{}", r.trim()),
-                        Some(TaskResult::Error(e)) => println!("Error: {}", e),
-                        _ => println!("Failed to retrieve storage stats"),
+                    let has_disk = master
+                        .connected_nodes
+                        .blocking_lock()
+                        .values()
+                        .any(|n| matches!(n.role, cpcluster_common::NodeRole::Disk));
+                    if !has_disk {
+                        println!("No disk nodes available");
+                    } else {
+                        match rt.block_on(submit_task_and_wait(&master, Task::GetStorage, 5000)) {
+                            Some(TaskResult::Response(r)) => println!("{}", r.trim()),
+                            Some(TaskResult::Error(e)) => println!("Error: {}", e),
+                            _ => println!("Failed to retrieve storage stats"),
+                        }
                     }
                 }
                 "exit" | "quit" => {
