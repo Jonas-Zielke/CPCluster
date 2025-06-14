@@ -173,3 +173,118 @@ async fn disk_path_safety() -> Result<(), Box<dyn std::error::Error + Send + Syn
     assert!(matches!(res, TaskResult::Error(_)));
     Ok(())
 }
+
+#[tokio::test]
+async fn get_global_ram_returns_stats() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let client = Client::new();
+    let store = MemoryStore::new();
+    execute_node_task(
+        Task::StoreData {
+            key: "a".into(),
+            data: b"x".to_vec(),
+        },
+        &client,
+        "./",
+        &store,
+        None,
+        None,
+    )
+    .await;
+    execute_node_task(
+        Task::StoreData {
+            key: "b".into(),
+            data: vec![1u8; 3],
+        },
+        &client,
+        "./",
+        &store,
+        None,
+        None,
+    )
+    .await;
+    let res = execute_node_task(Task::GetGlobalRam, &client, "./", &store, None, None).await;
+    let expected = {
+        let mut e: Vec<String> = store
+            .stats()
+            .await
+            .into_iter()
+            .map(|(id, size)| format!("{}: {} bytes", id, size))
+            .collect();
+        e.sort();
+        e
+    };
+    match res {
+        TaskResult::Response(s) => {
+            let mut lines: Vec<String> = s.lines().map(|l| l.to_string()).collect();
+            lines.sort();
+            assert_eq!(lines, expected);
+        }
+        other => panic!("unexpected result: {:?}", other),
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn get_storage_returns_stats() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let dir = tempdir()?;
+    let client = Client::new();
+    let store = MemoryStore::new();
+    let disk = cpcluster_node::disk_store::DiskStore::new(dir.path().to_path_buf(), 1);
+    execute_node_task(
+        Task::StoreData {
+            key: "f1".into(),
+            data: b"1".to_vec(),
+        },
+        &client,
+        dir.path().to_str().unwrap(),
+        &store,
+        Some(&disk),
+        None,
+    )
+    .await;
+    execute_node_task(
+        Task::StoreData {
+            key: "f2".into(),
+            data: vec![0u8; 2],
+        },
+        &client,
+        dir.path().to_str().unwrap(),
+        &store,
+        Some(&disk),
+        None,
+    )
+    .await;
+    let res = execute_node_task(
+        Task::GetStorage,
+        &client,
+        dir.path().to_str().unwrap(),
+        &store,
+        Some(&disk),
+        None,
+    )
+    .await;
+    let expected = {
+        let (files, free) = disk.stats().await?;
+        let mut e: Vec<String> = vec![format!("free: {} bytes", free)];
+        if files.is_empty() {
+            e.push("No entries found".into());
+        } else {
+            let entries: Vec<_> = files
+                .into_iter()
+                .map(|(id, size)| format!("{}: {} bytes", id, size))
+                .collect();
+            e.extend(entries);
+        }
+        e.sort();
+        e
+    };
+    match res {
+        TaskResult::Response(s) => {
+            let mut lines: Vec<String> = s.lines().map(|l| l.to_string()).collect();
+            lines.sort();
+            assert_eq!(lines, expected);
+        }
+        other => panic!("unexpected result: {:?}", other),
+    }
+    Ok(())
+}
