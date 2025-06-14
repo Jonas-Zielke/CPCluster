@@ -70,7 +70,7 @@ The master writes a `join.json` file containing the authentication token. Becaus
    cargo fmt
    cargo clippy
    ```
-4. Build each crate individually using `cargo build` inside `CPCluster_masterNode` and `CPCluster_node`.
+4. Build the entire workspace once using `cargo build --workspace`.
 5. Run nodes separately in different terminals with `cargo run`.
 6. Runtime options such as port ranges or master addresses are loaded from `config.json` via the `Config` helper in `cpcluster_common`.
 

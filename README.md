@@ -64,9 +64,9 @@ OpenSSL development libraries manually before building.
      cd CPCluster_node
      ```
 
-3. **Build each project**:
+3. **Build the workspace**:
    ```bash
-   cargo build
+   cargo build --workspace
    ```
 
 ### Configuration
