@@ -19,7 +19,7 @@ pub mod state;
 pub mod tls;
 
 use shell::run_shell;
-use state::{load_state, save_state, spawn_save_state, MasterNode, NodeInfo};
+use state::{load_state, spawn_save_state, MasterNode, NodeInfo};
 use tls::load_or_generate_tls_config;
 
 async fn send_pending_tasks<S>(
@@ -364,7 +364,7 @@ pub async fn run(config_path: &str, join_path: &str) -> Result<(), Box<dyn Error
         }
     });
     loop {
-        let (mut stream, addr) = listener.accept().await?;
+        let (stream, addr) = listener.accept().await?;
         let _ = stream.set_nodelay(true);
         let master_node = Arc::clone(&master_node);
         let token = token.clone();

@@ -373,7 +373,7 @@ async fn handle_connection(
     let connect_fut = TcpStream::connect(&addr);
     let mut stream: Box<dyn ReadWrite + Unpin + Send>;
     tokio::select! {
-        Ok(mut sock) = connect_fut => {
+        Ok(sock) = connect_fut => {
             let _ = sock.set_nodelay(true);
             if use_tls {
                 let config = build_tls_config(ca_path, ca_cert)?;
@@ -412,7 +412,7 @@ async fn handle_connection(
                 stream = Box::new(sock);
             }
         }
-        Ok((mut sock, _)) = listener.accept() => {
+        Ok((sock, _)) = listener.accept() => {
             let _ = sock.set_nodelay(true);
             if use_tls {
                 let config = build_tls_config(ca_path, ca_cert)?;
