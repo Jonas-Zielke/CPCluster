@@ -19,7 +19,7 @@ When starting, the master writes `join.json` with the authentication token. Rest
 After startup the master opens an interactive shell. Useful commands include:
 
 ```
-nodes             # list connected nodes
+nodes             # list connected nodes with their role
 tasks             # list queued tasks
 task <id>         # inspect a specific task
 addtask <type> <args>  # queue a new task
