@@ -79,7 +79,17 @@ OpenSSL development libraries manually before building.
 ### Configuration
 
 1. **Generate join.json**: When the master node is started, it creates a `join.json` file with a unique token for network access.
-2. **Securely distribute `join.json`**: Restrict file permissions and use an encrypted channel when copying the file. You can also set the token via the `CPCLUSTER_TOKEN` environment variable to avoid storing it on disk.
+2. **Securely distribute `join.json`**: Restrict access and encrypt the file before transferring it. One approach is:
+   ```bash
+   chmod 600 join.json
+   gpg --recipient alice@example.com --encrypt join.json
+   scp join.json.gpg node:/tmp/join.json.gpg
+   ssh node 'gpg --decrypt /tmp/join.json.gpg > ~/CPCluster_node/join.json && chmod 600 ~/CPCluster_node/join.json'
+   ```
+   Instead of copying the file, export the token on each node via the `CPCLUSTER_TOKEN` environment variable:
+   ```bash
+   export CPCLUSTER_TOKEN=<token-from-master>
+   ```
 3. **Copy `join.json` to nodes**: If not using the environment variable, each node must have a `join.json` file identical to the one in the master node directory. Copy this file to the `CPCluster_node` directory for each node that will join the network.
 4. **Edit `config.json`**: Both master and nodes read runtime options from `config.json` by default. You can pass a different file as the first command line argument. The configuration lets you tune the port range, failover timeout, master addresses and TLS certificates. Additional fields include `role` (`Worker`, `Disk`, `Internet`), `storage_dir`, `disk_space_mb` and `internet_ports`.
 5. **Generate TLS certificates (optional)**: To secure traffic between nodes and the master, create a certificate for the master node and distribute it to all nodes:
