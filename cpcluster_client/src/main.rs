@@ -67,6 +67,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let addr = format!("{}:{}", join_info.ip, join_info.port);
     info!("Connecting to master at {}", addr);
     let mut stream = TcpStream::connect(&addr).await?;
+    let _ = stream.set_nodelay(true);
 
     write_length_prefixed(&mut stream, join_info.token.as_bytes()).await?;
     let resp = read_length_prefixed(&mut stream).await?;

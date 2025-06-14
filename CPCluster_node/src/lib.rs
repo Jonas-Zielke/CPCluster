@@ -76,15 +76,39 @@ pub async fn execute_node_task(
                         if s.bind(std::net::SocketAddr::from(([0, 0, 0, 0], inet)))
                             .is_ok()
                         {
-                            s.connect(addr.parse().unwrap()).await
+                            match s.connect(addr.parse().unwrap()).await {
+                                Ok(stream) => {
+                                    let _ = stream.set_nodelay(true);
+                                    Ok(stream)
+                                }
+                                Err(e) => Err(e),
+                            }
                         } else {
-                            TcpStream::connect(&addr).await
+                            match TcpStream::connect(&addr).await {
+                                Ok(stream) => {
+                                    let _ = stream.set_nodelay(true);
+                                    Ok(stream)
+                                }
+                                Err(e) => Err(e),
+                            }
                         }
                     }
-                    Err(_) => TcpStream::connect(&addr).await,
+                    Err(_) => match TcpStream::connect(&addr).await {
+                        Ok(stream) => {
+                            let _ = stream.set_nodelay(true);
+                            Ok(stream)
+                        }
+                        Err(e) => Err(e),
+                    },
                 }
             } else {
-                TcpStream::connect(&addr).await
+                match TcpStream::connect(&addr).await {
+                    Ok(stream) => {
+                        let _ = stream.set_nodelay(true);
+                        Ok(stream)
+                    }
+                    Err(e) => Err(e),
+                }
             };
             match connect_res {
                 Ok(mut stream) => {

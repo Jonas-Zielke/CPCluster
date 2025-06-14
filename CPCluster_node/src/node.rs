@@ -208,9 +208,11 @@ async fn connect(
 ) -> Result<Box<dyn ReadWrite + Unpin + Send>, Box<dyn Error + Send + Sync>> {
     if local {
         let tcp = TcpStream::connect(addr).await?;
+        let _ = tcp.set_nodelay(true);
         Ok(Box::new(tcp))
     } else {
         let tcp = TcpStream::connect(addr).await?;
+        let _ = tcp.set_nodelay(true);
         let config = build_tls_config(ca_path, ca_cert)?;
         let connector = TlsConnector::from(Arc::new(config));
         let server_name = rustls::ServerName::try_from(ip)?;
@@ -372,6 +374,7 @@ async fn handle_connection(
     let mut stream: Box<dyn ReadWrite + Unpin + Send>;
     tokio::select! {
         Ok(sock) = connect_fut => {
+            let _ = sock.set_nodelay(true);
             if use_tls {
                 let config = build_tls_config(ca_path, ca_cert)?;
                 let connector = TlsConnector::from(Arc::new(config));
@@ -410,6 +413,7 @@ async fn handle_connection(
             }
         }
         Ok((sock, _)) = listener.accept() => {
+            let _ = sock.set_nodelay(true);
             if use_tls {
                 let config = build_tls_config(ca_path, ca_cert)?;
                 let connector = TlsConnector::from(Arc::new(config));

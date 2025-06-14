@@ -12,6 +12,7 @@ pub struct DiskStore {
 
 impl DiskStore {
     pub fn new(dir: PathBuf, quota_mb: u64) -> Self {
+        std::fs::create_dir_all(&dir).ok();
         let usage = directory_size_sync(&dir).unwrap_or(0);
         Self {
             dir,
@@ -21,7 +22,6 @@ impl DiskStore {
     }
 
     pub async fn store(&self, id: String, data: Vec<u8>) -> std::io::Result<()> {
-        fs::create_dir_all(&self.dir).await?;
         let path = self.dir.join(&id);
         let old_size = fs::metadata(&path).await.ok().map(|m| m.len()).unwrap_or(0);
         let data_len = data.len() as u64;
@@ -41,7 +41,6 @@ impl DiskStore {
 
     /// Return a list of all stored files with their size in bytes and the remaining free space
     pub async fn stats(&self) -> std::io::Result<(Vec<(String, u64)>, u64)> {
-        fs::create_dir_all(&self.dir).await?;
         let mut entries = Vec::new();
         let mut dir = fs::read_dir(&self.dir).await?;
         while let Some(entry) = dir.next_entry().await? {
