@@ -6,6 +6,7 @@ pub mod disk_store;
 pub mod internet_ports;
 pub mod memory_store;
 pub mod node;
+pub use cpcluster_common::execute_task;
 
 use disk_store::DiskStore;
 use internet_ports::InternetPorts;
@@ -55,7 +56,7 @@ fn eval_complex(expr: &str) -> Result<Complex64, String> {
     stack.pop().ok_or("no result".into())
 }
 
-pub async fn execute_task(
+pub async fn execute_node_task(
     task: Task,
     client: &Client,
     storage_dir: &str,

@@ -1,8 +1,6 @@
 use cpcluster_common::{
     NodeMessage, Task, TaskResult, read_length_prefixed, write_length_prefixed,
 };
-use meval::eval_str;
-use reqwest::Client;
 use std::error::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::{Duration, sleep};
@@ -33,19 +31,4 @@ where
     }
 }
 
-pub async fn execute_task(task: Task, client: &Client) -> TaskResult {
-    match task {
-        Task::Compute { expression } => match eval_str(&expression) {
-            Ok(v) => TaskResult::Number(v),
-            Err(e) => TaskResult::Error(e.to_string()),
-        },
-        Task::HttpRequest { url } => match client.get(&url).send().await {
-            Ok(resp) => match resp.text().await {
-                Ok(text) => TaskResult::Response(text),
-                Err(e) => TaskResult::Error(e.to_string()),
-            },
-            Err(e) => TaskResult::Error(e.to_string()),
-        },
-        _ => TaskResult::Error("Unsupported task".into()),
-    }
-}
+pub use cpcluster_common::execute_task;

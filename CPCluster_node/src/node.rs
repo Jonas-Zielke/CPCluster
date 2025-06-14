@@ -1,5 +1,5 @@
 use crate::{
-    disk_store::DiskStore, execute_task, internet_ports::InternetPorts, memory_store::MemoryStore,
+    disk_store::DiskStore, execute_node_task, internet_ports::InternetPorts, memory_store::MemoryStore,
 };
 use cpcluster_common::config::Config;
 use cpcluster_common::{
@@ -159,7 +159,7 @@ async fn heartbeat_loop(
                             info!("Received heartbeat acknowledgement from master");
                         }
                         NodeMessage::AssignTask { id, task } => {
-                            let result = execute_task(
+                            let result = execute_node_task(
                                 task,
                                 &http_client,
                                 &config.storage_dir,
@@ -455,7 +455,7 @@ async fn handle_connection(
             Err(_) => break,
         };
         if let Ok(NodeMessage::AssignTask { id, task }) = serde_json::from_slice(&buf) {
-            let result = execute_task(
+            let result = execute_node_task(
                 task,
                 &client,
                 storage_dir,

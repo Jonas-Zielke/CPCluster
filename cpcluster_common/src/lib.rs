@@ -3,6 +3,8 @@ use std::borrow::Cow;
 
 pub mod config;
 pub use config::Config;
+pub mod execute;
+pub use execute::execute_task;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub enum NodeRole {
