@@ -6,8 +6,8 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, Mutex as StdMutex},
 };
-use tokio::sync::Mutex;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 
 #[tokio::test]
 async fn master_node_interaction() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
