@@ -32,18 +32,24 @@ async fn submit_task_and_wait(
     let id = Uuid::new_v4().to_string();
     master.pending_tasks.lock().await.insert(id.clone(), task);
     save_state(master).await;
-    let start = std::time::Instant::now();
-    loop {
-        if let Some(result) = master.completed_tasks.lock().await.remove(&id) {
-            save_state(master).await;
-            return Some(result);
+    let check_interval = std::time::Duration::from_millis(100);
+    let fut = async {
+        let mut interval = tokio::time::interval(check_interval);
+        loop {
+            if let Some(result) = master.completed_tasks.lock().await.remove(&id) {
+                save_state(master).await;
+                return Some(result);
+            }
+            interval.tick().await;
         }
-        if start.elapsed().as_millis() as u64 > timeout_ms {
+    };
+    match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), fut).await {
+        Ok(res) => res,
+        Err(_) => {
             master.pending_tasks.lock().await.remove(&id);
             save_state(master).await;
-            return None;
+            None
         }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 }
 
