@@ -4,7 +4,7 @@ use tokio::runtime::Handle;
 use cpcluster_common::{NodeRole, Task, TaskResult};
 use uuid::Uuid;
 
-use crate::state::{save_state, MasterNode};
+use crate::state::{save_state, MasterNode, PendingTask};
 
 fn now_ms() -> u64 {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -30,7 +30,47 @@ async fn submit_task_and_wait(
     timeout_ms: u64,
 ) -> Option<TaskResult> {
     let id = Uuid::new_v4().to_string();
-    master.pending_tasks.lock().await.insert(id.clone(), task);
+    master
+        .pending_tasks
+        .lock()
+        .await
+        .insert(id.clone(), PendingTask { task, target: None });
+    save_state(master).await;
+    let check_interval = std::time::Duration::from_millis(100);
+    let fut = async {
+        let mut interval = tokio::time::interval(check_interval);
+        loop {
+            if let Some(result) = master.completed_tasks.lock().await.remove(&id) {
+                save_state(master).await;
+                return Some(result);
+            }
+            interval.tick().await;
+        }
+    };
+    match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), fut).await {
+        Ok(res) => res,
+        Err(_) => {
+            master.pending_tasks.lock().await.remove(&id);
+            save_state(master).await;
+            None
+        }
+    }
+}
+
+async fn submit_task_for_node(
+    master: &MasterNode,
+    target: &str,
+    task: Task,
+    timeout_ms: u64,
+) -> Option<TaskResult> {
+    let id = Uuid::new_v4().to_string();
+    master.pending_tasks.lock().await.insert(
+        id.clone(),
+        PendingTask {
+            task,
+            target: Some(target.to_string()),
+        },
+    );
     save_state(master).await;
     let check_interval = std::time::Duration::from_millis(100);
     let fut = async {
@@ -92,8 +132,8 @@ pub fn run_shell(master: Arc<MasterNode>, rt: Handle) {
                         println!("No pending tasks");
                     } else {
                         println!("Pending tasks:");
-                        for (id, task) in pending.iter() {
-                            println!("{} -> {:?}", id, task);
+                        for (id, ptask) in pending.iter() {
+                            println!("{} -> {:?}", id, ptask);
                         }
                     }
                     drop(pending);
@@ -151,34 +191,76 @@ pub fn run_shell(master: Arc<MasterNode>, rt: Handle) {
                         master
                             .pending_tasks
                             .blocking_lock()
-                            .insert(id.clone(), task);
+                            .insert(id.clone(), PendingTask { task, target: None });
                         rt.block_on(save_state(&master));
                         println!("Queued task {}", id);
                     }
                 }
                 "getglobalram" => {
-                    if !has_active_node(&master, NodeRole::Worker) {
+                    let nodes: Vec<String> = {
+                        let now = now_ms();
+                        master
+                            .connected_nodes
+                            .blocking_lock()
+                            .values()
+                            .filter(|n| {
+                                n.role == NodeRole::Worker
+                                    && now.saturating_sub(n.last_heartbeat)
+                                        <= master.failover_timeout_ms * 2
+                            })
+                            .map(|n| n.addr.clone())
+                            .collect()
+                    };
+                    if nodes.is_empty() {
                         println!("No worker nodes available");
                     } else {
-                        println!("Retrieving RAM stats, please wait...");
-                        match rt.block_on(submit_task_and_wait(&master, Task::GetGlobalRam, 5000)) {
-                            Some(TaskResult::Response(r)) => println!("{}", r.trim()),
-                            Some(TaskResult::Error(e)) => println!("Error: {}", e),
-                            Some(other) => println!("Unexpected result: {:?}", other),
-                            None => println!("Timed out retrieving RAM stats"),
+                        for addr in nodes {
+                            println!("--- {} ---", addr);
+                            match rt.block_on(submit_task_for_node(
+                                &master,
+                                &addr,
+                                Task::GetGlobalRam,
+                                5000,
+                            )) {
+                                Some(TaskResult::Response(r)) => println!("{}", r.trim()),
+                                Some(TaskResult::Error(e)) => println!("Error: {}", e),
+                                Some(other) => println!("Unexpected result: {:?}", other),
+                                None => println!("Timed out retrieving RAM stats"),
+                            }
                         }
                     }
                 }
                 "getstorage" => {
-                    if !has_active_node(&master, NodeRole::Disk) {
+                    let nodes: Vec<String> = {
+                        let now = now_ms();
+                        master
+                            .connected_nodes
+                            .blocking_lock()
+                            .values()
+                            .filter(|n| {
+                                n.role == NodeRole::Disk
+                                    && now.saturating_sub(n.last_heartbeat)
+                                        <= master.failover_timeout_ms * 2
+                            })
+                            .map(|n| n.addr.clone())
+                            .collect()
+                    };
+                    if nodes.is_empty() {
                         println!("No disk nodes available");
                     } else {
-                        println!("Retrieving storage stats, please wait...");
-                        match rt.block_on(submit_task_and_wait(&master, Task::GetStorage, 5000)) {
-                            Some(TaskResult::Response(r)) => println!("{}", r.trim()),
-                            Some(TaskResult::Error(e)) => println!("Error: {}", e),
-                            Some(other) => println!("Unexpected result: {:?}", other),
-                            None => println!("Timed out retrieving storage stats"),
+                        for addr in nodes {
+                            println!("--- {} ---", addr);
+                            match rt.block_on(submit_task_for_node(
+                                &master,
+                                &addr,
+                                Task::GetStorage,
+                                5000,
+                            )) {
+                                Some(TaskResult::Response(r)) => println!("{}", r.trim()),
+                                Some(TaskResult::Error(e)) => println!("Error: {}", e),
+                                Some(other) => println!("Unexpected result: {:?}", other),
+                                None => println!("Timed out retrieving storage stats"),
+                            }
                         }
                     }
                 }

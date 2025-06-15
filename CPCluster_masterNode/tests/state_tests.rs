@@ -1,5 +1,5 @@
 use cpcluster_common::Task;
-use cpcluster_masternode::state::{load_state, save_state, MasterNode};
+use cpcluster_masternode::state::{load_state, save_state, MasterNode, PendingTask};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -21,8 +21,11 @@ async fn master_state_persists_pending_tasks(
 
     master.pending_tasks.lock().await.insert(
         "task1".into(),
-        Task::Compute {
-            expression: "1+1".into(),
+        PendingTask {
+            task: Task::Compute {
+                expression: "1+1".into(),
+            },
+            target: None,
         },
     );
 
