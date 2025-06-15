@@ -14,49 +14,6 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn has_active_node(master: &MasterNode, role: NodeRole) -> bool {
-    let timeout = master.failover_timeout_ms * 2;
-    let now = now_ms();
-    master
-        .connected_nodes
-        .blocking_lock()
-        .values()
-        .any(|n| n.role == role && now.saturating_sub(n.last_heartbeat) <= timeout)
-}
-
-async fn submit_task_and_wait(
-    master: &MasterNode,
-    task: Task,
-    timeout_ms: u64,
-) -> Option<TaskResult> {
-    let id = Uuid::new_v4().to_string();
-    master
-        .pending_tasks
-        .lock()
-        .await
-        .insert(id.clone(), PendingTask { task, target: None });
-    save_state(master).await;
-    let check_interval = std::time::Duration::from_millis(100);
-    let fut = async {
-        let mut interval = tokio::time::interval(check_interval);
-        loop {
-            if let Some(result) = master.completed_tasks.lock().await.remove(&id) {
-                save_state(master).await;
-                return Some(result);
-            }
-            interval.tick().await;
-        }
-    };
-    match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), fut).await {
-        Ok(res) => res,
-        Err(_) => {
-            master.pending_tasks.lock().await.remove(&id);
-            save_state(master).await;
-            None
-        }
-    }
-}
-
 async fn submit_task_for_node(
     master: &MasterNode,
     target: &str,
