@@ -154,10 +154,12 @@ pub fn run_shell(master: Arc<MasterNode>, rt: Handle) {
                     if !has_active_node(&master, NodeRole::Worker) {
                         println!("No worker nodes available");
                     } else {
+                        println!("Retrieving RAM stats, please wait...");
                         match rt.block_on(submit_task_and_wait(&master, Task::GetGlobalRam, 5000)) {
                             Some(TaskResult::Response(r)) => println!("{}", r.trim()),
                             Some(TaskResult::Error(e)) => println!("Error: {}", e),
-                            _ => println!("Failed to retrieve RAM stats"),
+                            Some(other) => println!("Unexpected result: {:?}", other),
+                            None => println!("Timed out retrieving RAM stats"),
                         }
                     }
                 }
@@ -165,10 +167,12 @@ pub fn run_shell(master: Arc<MasterNode>, rt: Handle) {
                     if !has_active_node(&master, NodeRole::Disk) {
                         println!("No disk nodes available");
                     } else {
+                        println!("Retrieving storage stats, please wait...");
                         match rt.block_on(submit_task_and_wait(&master, Task::GetStorage, 5000)) {
                             Some(TaskResult::Response(r)) => println!("{}", r.trim()),
                             Some(TaskResult::Error(e)) => println!("Error: {}", e),
-                            _ => println!("Failed to retrieve storage stats"),
+                            Some(other) => println!("Unexpected result: {:?}", other),
+                            None => println!("Timed out retrieving storage stats"),
                         }
                     }
                 }
