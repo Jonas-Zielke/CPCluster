@@ -174,10 +174,11 @@ async fn heartbeat_loop(
                             ).await;
                             let msg = NodeMessage::TaskResult { id: id.clone(), result };
                             open_tasks.lock().await.insert(id.clone(), msg.clone());
-                            if let Err(e) = send_message(&mut stream, msg.clone()).await {
-                                warn!("Failed to send task result: {}", e);
+                            if send_message(&mut stream, msg.clone()).await.is_ok() {
+                                open_tasks.lock().await.remove(&id);
+                            } else {
+                                warn!("Failed to send task result: retrying on reconnect");
                             }
-                            open_tasks.lock().await.remove(&id);
                         }
                         _ => {}
                     }
@@ -478,8 +479,11 @@ async fn handle_connection(
                 result,
             };
             tasks.lock().await.insert(id.clone(), msg.clone());
-            send_message(&mut stream, msg.clone()).await?;
-            tasks.lock().await.remove(&id);
+            if send_message(&mut stream, msg.clone()).await.is_ok() {
+                tasks.lock().await.remove(&id);
+            } else {
+                warn!("Failed to send task result over direct connection: retrying later");
+            }
         }
     }
     Ok(())
