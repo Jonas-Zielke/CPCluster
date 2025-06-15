@@ -93,6 +93,7 @@ OpenSSL development libraries manually before building.
    ```
 3. **Copy `join.json` to nodes**: If not using the environment variable, each node must have a `join.json` file identical to the one in the master node directory. Copy this file to `CPCluster_node/join.json` for each node that will join the network. Nodes read from that path by default, or use `CPCLUSTER_JOIN` to specify a different location.
 4. **Edit the configuration file**: Both master and nodes read runtime options from `CPCluster_masterNode/config/config.json` and `CPCluster_node/config/config.json` by default. You can pass a different file as the first command line argument. The configuration lets you tune the port range, failover timeout, master addresses and TLS certificates. Additional fields include `role` (`Worker`, `Disk`, `Internet`), `storage_dir`, `disk_space_mb`, `internet_ports` and `state_file`.
+   Masters can list other masters in `peer_masters` to automatically synchronize pending tasks and node states.
 5. **Generate TLS certificates (optional)**: To secure traffic between nodes and the master, create a certificate for the master node and distribute it to all nodes:
    ```bash
    openssl req -x509 -newkey rsa:4096 -nodes -keyout master_key.pem \
@@ -202,6 +203,14 @@ Internet node opening specific ports for network tasks:
 {
   "role": "Internet",
   "internet_ports": [8080, 8443]
+}
+```
+
+Multiple masters peering with each other:
+
+```json
+{
+  "peer_masters": ["192.168.1.2:55000", "192.168.1.3:55000"]
 }
 ```
 

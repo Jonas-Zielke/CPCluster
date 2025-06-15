@@ -8,6 +8,8 @@ pub struct Config {
     pub max_port: u16,
     pub failover_timeout_ms: u64,
     pub master_addresses: Vec<String>,
+    #[serde(default)]
+    pub peer_masters: Option<Vec<String>>,
     pub ca_cert_path: Option<String>,
     pub ca_cert: Option<String>,
     pub cert_path: Option<String>,
@@ -36,6 +38,7 @@ impl Default for Config {
             max_port: 55999,
             failover_timeout_ms: 5000,
             master_addresses: vec!["127.0.0.1:55000".to_string()],
+            peer_masters: None,
             ca_cert_path: None,
             ca_cert: None,
             cert_path: None,

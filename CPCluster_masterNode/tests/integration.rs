@@ -1,8 +1,12 @@
 use cpcluster_common::{read_length_prefixed, write_length_prefixed, NodeMessage};
+use cpcluster_common::{NodeRole, Task};
+use cpcluster_masternode::state::{MasterNode, NodeInfo, PendingTask};
+use cpcluster_masternode::{connect_to_peer, handle_peer_connection};
 use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex},
+    collections::{HashMap, HashSet, VecDeque},
+    sync::{Arc, Mutex as StdMutex},
 };
+use tokio::sync::Mutex;
 use tokio::net::TcpListener;
 
 #[tokio::test]
@@ -14,7 +18,7 @@ async fn master_node_interaction() -> Result<(), Box<dyn std::error::Error + Sen
     let token_srv = token.clone();
 
     // ports available for allocation
-    let ports = Arc::new(Mutex::new(HashSet::from([addr.port() + 1])));
+    let ports = Arc::new(StdMutex::new(HashSet::from([addr.port() + 1])));
     let ports_srv = ports.clone();
 
     // spawn simplified master server
@@ -112,7 +116,7 @@ async fn port_released_after_disconnect() -> Result<(), Box<dyn std::error::Erro
     let token = "testtoken".to_string();
     let token_srv = token.clone();
 
-    let ports = Arc::new(Mutex::new(HashSet::from([addr.port() + 1])));
+    let ports = Arc::new(StdMutex::new(HashSet::from([addr.port() + 1])));
     let ports_srv = ports.clone();
     let released = ports.clone();
 
@@ -172,5 +176,88 @@ async fn port_released_after_disconnect() -> Result<(), Box<dyn std::error::Erro
 
     server.await.expect("server task");
     assert!(ports.lock().expect("lock").contains(&(addr.port() + 1)));
+    Ok(())
+}
+
+#[tokio::test]
+async fn masters_sync_state() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+
+    let master1 = Arc::new(MasterNode {
+        connected_nodes: Arc::new(Mutex::new(HashMap::new())),
+        available_ports: Arc::new(Mutex::new(VecDeque::new())),
+        failover_timeout_ms: 1000,
+        pending_tasks: Arc::new(Mutex::new(HashMap::new())),
+        completed_tasks: Arc::new(Mutex::new(HashMap::new())),
+        state_file: "m1.json".into(),
+    });
+    let master2 = Arc::new(MasterNode {
+        connected_nodes: Arc::new(Mutex::new(HashMap::new())),
+        available_ports: Arc::new(Mutex::new(VecDeque::new())),
+        failover_timeout_ms: 1000,
+        pending_tasks: Arc::new(Mutex::new(HashMap::new())),
+        completed_tasks: Arc::new(Mutex::new(HashMap::new())),
+        state_file: "m2.json".into(),
+    });
+
+    master1.pending_tasks.lock().await.insert(
+        "task1".into(),
+        PendingTask {
+            task: Task::Compute {
+                expression: "1+1".into(),
+            },
+            target: None,
+        },
+    );
+    master2.pending_tasks.lock().await.insert(
+        "task2".into(),
+        PendingTask {
+            task: Task::Compute {
+                expression: "2+2".into(),
+            },
+            target: None,
+        },
+    );
+
+    master1.connected_nodes.lock().await.insert(
+        "node1".into(),
+        NodeInfo {
+            addr: "node1".into(),
+            last_heartbeat: 0,
+            port: None,
+            active_tasks: HashMap::new(),
+            is_worker: true,
+            role: NodeRole::Worker,
+        },
+    );
+    master2.connected_nodes.lock().await.insert(
+        "node2".into(),
+        NodeInfo {
+            addr: "node2".into(),
+            last_heartbeat: 0,
+            port: None,
+            active_tasks: HashMap::new(),
+            is_worker: true,
+            role: NodeRole::Worker,
+        },
+    );
+
+    let m2 = Arc::clone(&master2);
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await?;
+        let token = read_length_prefixed(&mut stream).await?;
+        assert_eq!(String::from_utf8(token)?, "MASTER_SYNC");
+        handle_peer_connection(stream, m2).await?;
+        Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+    });
+
+    connect_to_peer(addr.to_string(), Arc::clone(&master1)).await;
+    server.await??;
+
+    assert!(master1.pending_tasks.lock().await.contains_key("task2"));
+    assert!(master2.pending_tasks.lock().await.contains_key("task1"));
+    assert!(master1.connected_nodes.lock().await.contains_key("node2"));
+    assert!(master2.connected_nodes.lock().await.contains_key("node1"));
     Ok(())
 }
