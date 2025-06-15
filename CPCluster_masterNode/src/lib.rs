@@ -1,5 +1,5 @@
 use cpcluster_common::config::Config;
-use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage};
+use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, NodeRole, Task};
 use cpcluster_common::{read_length_prefixed, write_length_prefixed};
 use log::{error, info, warn};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -22,6 +22,14 @@ use shell::run_shell;
 use state::{load_state, save_state, MasterNode, NodeInfo};
 use tls::load_or_generate_tls_config;
 
+fn role_for_task(task: &Task) -> NodeRole {
+    match task {
+        Task::GetStorage | Task::DiskWrite { .. } | Task::DiskRead { .. } => NodeRole::Disk,
+        Task::Tcp { .. } | Task::Udp { .. } => NodeRole::Internet,
+        _ => NodeRole::Worker,
+    }
+}
+
 async fn send_pending_tasks<S>(
     socket: &mut S,
     master: &MasterNode,
@@ -30,18 +38,20 @@ async fn send_pending_tasks<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    if let Some(node) = master.connected_nodes.lock().await.get(addr) {
-        if !node.is_worker {
-            return Ok(());
-        }
-    }
+    let role = match master.connected_nodes.lock().await.get(addr) {
+        Some(node) if node.is_worker => node.role.clone(),
+        _ => return Ok(()),
+    };
     loop {
         let next_task = {
             let mut pending = master.pending_tasks.lock().await;
             let nodes = master.connected_nodes.lock().await;
             if let Some((id, task)) = pending
                 .iter()
-                .find(|(id, _)| !nodes.values().any(|n| n.active_tasks.contains_key(*id)))
+                .find(|(id, t)| {
+                    role_for_task(t) == role
+                        && !nodes.values().any(|n| n.active_tasks.contains_key(*id))
+                })
                 .map(|(id, task)| (id.clone(), task.clone()))
             {
                 pending.remove(&id);
