@@ -6,6 +6,13 @@ use tokio::sync::Mutex;
 use cpcluster_common::{NodeRole, Task, TaskResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingTask {
+    pub task: Task,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInfo {
     pub addr: String,
     pub last_heartbeat: u64,
@@ -22,7 +29,7 @@ pub struct MasterNode {
     pub connected_nodes: Arc<Mutex<HashMap<String, NodeInfo>>>,
     pub available_ports: Arc<Mutex<VecDeque<u16>>>,
     pub failover_timeout_ms: u64,
-    pub pending_tasks: Arc<Mutex<HashMap<String, Task>>>,
+    pub pending_tasks: Arc<Mutex<HashMap<String, PendingTask>>>,
     pub completed_tasks: Arc<Mutex<HashMap<String, TaskResult>>>,
     pub state_file: String,
 }
@@ -31,7 +38,7 @@ pub struct MasterNode {
 struct MasterState {
     connected_nodes: HashMap<String, NodeInfo>,
     available_ports: Vec<u16>,
-    pending_tasks: HashMap<String, Task>,
+    pending_tasks: HashMap<String, PendingTask>,
     #[serde(default)]
     completed_tasks: HashMap<String, TaskResult>,
 }

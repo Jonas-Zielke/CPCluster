@@ -19,7 +19,7 @@ pub mod state;
 pub mod tls;
 
 use shell::run_shell;
-use state::{load_state, spawn_save_state, MasterNode, NodeInfo};
+use state::{load_state, spawn_save_state, MasterNode, NodeInfo, PendingTask};
 use tls::load_or_generate_tls_config;
 
 fn role_for_task(task: &Task) -> NodeRole {
@@ -46,21 +46,22 @@ where
         let next_task = {
             let mut pending = master.pending_tasks.lock().await;
             let nodes = master.connected_nodes.lock().await;
-            if let Some((id, task)) = pending
+            if let Some((id, ptask)) = pending
                 .iter()
-                .find(|(id, t)| {
-                    role_for_task(t) == role
+                .find(|(id, p)| {
+                    (p.target.as_deref().map(|t| t == addr).unwrap_or(true))
+                        && role_for_task(&p.task) == role
                         && !nodes.values().any(|n| n.active_tasks.contains_key(*id))
                 })
-                .map(|(id, task)| (id.clone(), task.clone()))
+                .map(|(id, p)| (id.clone(), p.clone()))
             {
                 pending.remove(&id);
-                Some((id, task))
+                Some((id, ptask))
             } else {
                 None
             }
         };
-        let (id, task) = match next_task {
+        let (id, ptask) = match next_task {
             Some(t) => t,
             None => break,
         };
@@ -70,11 +71,11 @@ where
             .await
             .entry(addr.to_string())
             .and_modify(|n| {
-                n.active_tasks.insert(id.clone(), task.clone());
+                n.active_tasks.insert(id.clone(), ptask.task.clone());
             });
         let msg = NodeMessage::AssignTask {
             id: id.clone(),
-            task: task.clone(),
+            task: ptask.task.clone(),
         };
         let data = serde_json::to_vec(&msg)?;
         if let Err(e) = write_length_prefixed(socket, &data).await {
@@ -82,7 +83,7 @@ where
                 .pending_tasks
                 .lock()
                 .await
-                .insert(id.clone(), task.clone());
+                .insert(id.clone(), ptask.clone());
             master
                 .connected_nodes
                 .lock()
@@ -148,7 +149,7 @@ async fn cleanup_dead_nodes(master: &Arc<MasterNode>) {
         if let Some(info) = info_opt {
             let mut pending = master.pending_tasks.lock().await;
             for (id, task) in info.active_tasks {
-                pending.insert(id, task);
+                pending.insert(id, PendingTask { task, target: None });
             }
         }
         release_port(master, addr.clone()).await;
@@ -248,7 +249,7 @@ where
                         .pending_tasks
                         .lock()
                         .await
-                        .insert(id.clone(), task);
+                        .insert(id.clone(), PendingTask { task, target: None });
                     spawn_save_state(&master_node);
                     let ack = serde_json::to_vec(&NodeMessage::TaskAccepted(id))?;
                     write_length_prefixed(&mut socket, &ack).await?;
