@@ -3,6 +3,9 @@ use cpcluster_common::JoinInfo;
 use cpcluster_node::node::run;
 use std::{env, error::Error, fs, io};
 
+const DEFAULT_CONFIG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/config/config.json");
+const DEFAULT_JOIN_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/join.json");
+
 fn parse_config_path<I: Iterator<Item = String>>(mut args: I) -> String {
     args.next();
     for arg in args {
@@ -10,7 +13,7 @@ fn parse_config_path<I: Iterator<Item = String>>(mut args: I) -> String {
             return arg;
         }
     }
-    "CPCluster_node/config/config.json".to_string()
+    DEFAULT_CONFIG_PATH.to_string()
 }
 
 fn parse_log_level<I: Iterator<Item = String>>(mut args: I) -> Option<log::LevelFilter> {
@@ -31,7 +34,7 @@ fn parse_log_level<I: Iterator<Item = String>>(mut args: I) -> Option<log::Level
 }
 
 fn join_path() -> String {
-    env::var("CPCLUSTER_JOIN").unwrap_or_else(|_| "join.json".to_string())
+    env::var("CPCLUSTER_JOIN").unwrap_or_else(|_| DEFAULT_JOIN_PATH.to_string())
 }
 
 #[tokio::main]
@@ -56,15 +59,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{join_path, parse_config_path, parse_log_level};
+    use super::{
+        join_path, parse_config_path, parse_log_level, DEFAULT_CONFIG_PATH, DEFAULT_JOIN_PATH,
+    };
 
     #[test]
     fn default_path() {
         let args = vec!["prog".to_string()];
-        assert_eq!(
-            parse_config_path(args.into_iter()),
-            "CPCluster_node/config/config.json"
-        );
+        assert_eq!(parse_config_path(args.into_iter()), DEFAULT_CONFIG_PATH);
     }
 
     #[test]
@@ -86,7 +88,7 @@ mod tests {
     #[test]
     fn join_env_default() {
         std::env::remove_var("CPCLUSTER_JOIN");
-        assert_eq!(join_path(), "join.json");
+        assert_eq!(join_path(), DEFAULT_JOIN_PATH);
     }
 
     #[test]

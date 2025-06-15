@@ -2,7 +2,7 @@
 
 This crate implements the CPCluster master connection manager. It listens for TCP connections (by default on `127.0.0.1:55000`), authenticates nodes via a token and coordinates direct connections between them.
 
-On startup the master generates a `join.json` file containing the token, its IP address and port. Nodes must provide this token when connecting. Set `CPCLUSTER_JOIN` before starting the master to control where this file is written.
+On startup the master generates a `join.json` file in the `CPCluster_masterNode` directory containing the token, its IP address and port. Nodes must provide this token when connecting. Set `CPCLUSTER_JOIN` before starting the master to control where this file is written.
 
 ## Running
 
@@ -12,7 +12,7 @@ cargo run -- <config-path>
 
 Replace `<config-path>` with the path to your configuration file if it is not `config/config.json`. The master listens on port **55000** and manages connection requests from nodes.
 
-When starting, the master writes `join.json` with the authentication token. Restrict access to this file (for example `chmod 600`) and consider encrypting it before copying to nodes. You can also provide the token via the `CPCLUSTER_TOKEN` environment variable instead of copying the file.
+When starting, the master writes `join.json` with the authentication token to `CPCluster_masterNode/join.json`. Restrict access to this file (for example `chmod 600`) and consider encrypting it before copying to nodes. You can also provide the token via the `CPCLUSTER_TOKEN` environment variable instead of copying the file.
 
 ### Master Shell
 

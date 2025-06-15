@@ -1,6 +1,6 @@
 # cpcluster_node
 
-`cpcluster_node` is a simple client used to join the CPCluster network. It reads the `join.json` file created by the master (use `CPCLUSTER_JOIN` to set a custom path), connects over TCP and exchanges `NodeMessage` requests. The token can also be supplied via the `CPCLUSTER_TOKEN` environment variable.
+`cpcluster_node` is a simple client used to join the CPCluster network. It reads the `join.json` file created by the master (written to `CPCluster_masterNode/join.json` by default). Use `CPCLUSTER_JOIN` to set a custom path. The token can also be supplied via the `CPCLUSTER_TOKEN` environment variable.
 
 ## Configuration
 
@@ -12,7 +12,7 @@ Key fields include:
 - **`storage_dir`** – directory used for on-disk tasks or RAM-disk storage.
 - **`internet_ports`** – list of ports Internet nodes open for external connections.
 
-`join.json` is expected in the working directory but can be overridden with the `CPCLUSTER_JOIN` environment variable. Likewise the connection token may be supplied via `CPCLUSTER_TOKEN`.
+`join.json` is expected in the `CPCluster_node` directory by default but can be overridden with the `CPCLUSTER_JOIN` environment variable. Likewise the connection token may be supplied via `CPCLUSTER_TOKEN`.
 
 ## Workflow
 

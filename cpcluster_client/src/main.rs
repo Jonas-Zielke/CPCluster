@@ -9,8 +9,10 @@ use tokio::net::TcpStream;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
+const DEFAULT_JOIN_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/join.json");
+
 fn join_path() -> String {
-    env::var("CPCLUSTER_JOIN").unwrap_or_else(|_| "join.json".to_string())
+    env::var("CPCLUSTER_JOIN").unwrap_or_else(|_| DEFAULT_JOIN_PATH.to_string())
 }
 
 async fn run_data_tests(stream: &mut TcpStream) -> Result<(), Box<dyn Error + Send + Sync>> {
