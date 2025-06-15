@@ -177,7 +177,7 @@ pub fn run_shell(master: Arc<MasterNode>, rt: Handle) {
                                 &master,
                                 &addr,
                                 Task::GetGlobalRam,
-                                5000,
+                                master.failover_timeout_ms * 2,
                             )) {
                                 Some(TaskResult::Response(r)) => println!("{}", r.trim()),
                                 Some(TaskResult::Error(e)) => println!("Error: {}", e),
@@ -211,7 +211,7 @@ pub fn run_shell(master: Arc<MasterNode>, rt: Handle) {
                                 &master,
                                 &addr,
                                 Task::GetStorage,
-                                5000,
+                                master.failover_timeout_ms * 2,
                             )) {
                                 Some(TaskResult::Response(r)) => println!("{}", r.trim()),
                                 Some(TaskResult::Error(e)) => println!("Error: {}", e),
