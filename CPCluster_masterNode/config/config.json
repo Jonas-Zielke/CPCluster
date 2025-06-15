@@ -1,14 +1,16 @@
 {
   "min_port": 55001,
   "max_port": 55999,
-  "failover_timeout_ms": 5000,
-  "master_addresses": ["127.0.0.1:55000"],
+  "failover_timeout_ms": 7000,
+  "master_addresses": [
+    "127.0.0.1:55000"
+  ],
   "ca_cert_path": null,
   "ca_cert": null,
   "cert_path": null,
   "key_path": null,
-  "storage_dir": "storage",
+  "storage_dir": "data/storage",
   "state_file": "master_state.json",
-  "max_retries": 5,
-  "log_level": "info"
+  "max_retries": 3,
+  "log_level": "debug"
 }

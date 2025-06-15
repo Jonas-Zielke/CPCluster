@@ -10,7 +10,7 @@ fn parse_config_path<I: Iterator<Item = String>>(mut args: I) -> String {
             return arg;
         }
     }
-    "config.json".to_string()
+    "CPCluster_node/config/config.json".to_string()
 }
 
 fn parse_log_level<I: Iterator<Item = String>>(mut args: I) -> Option<log::LevelFilter> {
@@ -61,7 +61,10 @@ mod tests {
     #[test]
     fn default_path() {
         let args = vec!["prog".to_string()];
-        assert_eq!(parse_config_path(args.into_iter()), "config.json");
+        assert_eq!(
+            parse_config_path(args.into_iter()),
+            "CPCluster_node/config/config.json"
+        );
     }
 
     #[test]
