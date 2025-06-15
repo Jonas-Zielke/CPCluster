@@ -1,5 +1,5 @@
 use cpcluster_common::config::Config;
-use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, NodeRole, Task};
+use cpcluster_common::{is_local_ip, JoinInfo, NodeMessage, NodeRole, Task, TaskResult};
 use cpcluster_common::{read_length_prefixed, write_length_prefixed};
 use log::{error, info, warn};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -21,6 +21,85 @@ pub mod tls;
 use shell::run_shell;
 use state::{load_state, spawn_save_state, MasterNode, NodeInfo, PendingTask};
 use tls::load_or_generate_tls_config;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PeerState {
+    connected_nodes: HashMap<String, NodeInfo>,
+    pending_tasks: HashMap<String, PendingTask>,
+    completed_tasks: HashMap<String, TaskResult>,
+}
+
+async fn collect_state(master: &MasterNode) -> PeerState {
+    PeerState {
+        connected_nodes: master.connected_nodes.lock().await.clone(),
+        pending_tasks: master.pending_tasks.lock().await.clone(),
+        completed_tasks: master.completed_tasks.lock().await.clone(),
+    }
+}
+
+async fn merge_state(master: &Arc<MasterNode>, state: PeerState) {
+    {
+        let mut nodes = master.connected_nodes.lock().await;
+        for (k, v) in state.connected_nodes {
+            nodes.entry(k).or_insert(v);
+        }
+    }
+    {
+        let mut pending = master.pending_tasks.lock().await;
+        for (k, v) in state.pending_tasks {
+            pending.entry(k).or_insert(v);
+        }
+    }
+    {
+        let mut completed = master.completed_tasks.lock().await;
+        for (k, v) in state.completed_tasks {
+            completed.entry(k).or_insert(v);
+        }
+    }
+    spawn_save_state(master);
+}
+
+pub async fn handle_peer_connection<S>(
+    mut socket: S,
+    master_node: Arc<MasterNode>,
+) -> Result<(), Box<dyn Error + Send + Sync>>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let data = read_length_prefixed(&mut socket).await?;
+    let state: PeerState = serde_json::from_slice(&data)?;
+    merge_state(&master_node, state).await;
+    let local_state = collect_state(&master_node).await;
+    let resp = serde_json::to_vec(&local_state)?;
+    write_length_prefixed(&mut socket, &resp).await?;
+    Ok(())
+}
+
+pub async fn connect_to_peer(addr: String, master_node: Arc<MasterNode>) {
+    match tokio::net::TcpStream::connect(&addr).await {
+        Ok(mut stream) => {
+            if write_length_prefixed(&mut stream, b"MASTER_SYNC")
+                .await
+                .is_ok()
+            {
+                if let Err(e) = async {
+                    let state = collect_state(&master_node).await;
+                    let data = serde_json::to_vec(&state)?;
+                    write_length_prefixed(&mut stream, &data).await?;
+                    let resp = read_length_prefixed(&mut stream).await?;
+                    let other: PeerState = serde_json::from_slice(&resp)?;
+                    merge_state(&master_node, other).await;
+                    Ok::<(), Box<dyn Error + Send + Sync>>(())
+                }
+                .await
+                {
+                    warn!("Peer sync with {} failed: {}", addr, e);
+                }
+            }
+        }
+        Err(e) => warn!("Failed to connect to peer {}: {}", addr, e),
+    }
+}
 
 fn role_for_task(task: &Task) -> NodeRole {
     match task {
@@ -168,7 +247,9 @@ where
 {
     let token_bytes = read_length_prefixed(&mut socket).await?;
     let received_token = String::from_utf8(token_bytes)?.trim().to_string();
-    if received_token == token {
+    if received_token == "MASTER_SYNC" {
+        return handle_peer_connection(socket, master_node).await;
+    } else if received_token == token {
         info!("Client authenticated with correct token");
         write_length_prefixed(&mut socket, b"OK").await?;
         master_node.connected_nodes.lock().await.insert(
@@ -361,6 +442,12 @@ pub async fn run(config_path: &str, join_path: &str) -> Result<(), Box<dyn Error
         state_file: config.state_file.clone(),
     });
     load_state(&master_node).await;
+    if let Some(peers) = config.peer_masters.clone() {
+        for peer in peers {
+            let m = Arc::clone(&master_node);
+            tokio::spawn(connect_to_peer(peer, m));
+        }
+    }
     let shell_master = Arc::clone(&master_node);
     let rt_handle = tokio::runtime::Handle::current();
     std::thread::spawn(move || {

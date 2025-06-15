@@ -5,6 +5,7 @@
   "master_addresses": [
     "127.0.0.1:55000"
   ],
+  "peer_masters": null,
   "ca_cert_path": null,
   "ca_cert": null,
   "cert_path": null,
