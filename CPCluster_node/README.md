@@ -4,7 +4,7 @@
 
 ## Configuration
 
-The node loads runtime options from `config.json` in the current directory. Pass a different file path as the first command line argument to `cargo run` to override it.
+The node loads runtime options from `config/config.json` in the crate directory. Pass a different file path as the first command line argument to `cargo run` to override it.
 
 Key fields include:
 

@@ -398,12 +398,12 @@ pub async fn run(config_path: &str, join_path: &str) -> Result<(), Box<dyn Error
 }
 
 pub async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let config = Config::load("config.json").unwrap_or_default();
+    let config = Config::load("CPCluster_masterNode/config/config.json").unwrap_or_default();
     let level = config
         .log_level
         .as_deref()
         .and_then(|l| l.parse().ok())
         .unwrap_or(log::LevelFilter::Info);
     env_logger::Builder::new().filter_level(level).init();
-    run("config.json", "join.json").await
+    run("CPCluster_masterNode/config/config.json", "join.json").await
 }

@@ -10,7 +10,7 @@ On startup the master generates a `join.json` file containing the token, its IP 
 cargo run -- <config-path>
 ```
 
-Replace `<config-path>` with the path to your configuration file if it is not `config.json`. The master listens on port **55000** and manages connection requests from nodes.
+Replace `<config-path>` with the path to your configuration file if it is not `config/config.json`. The master listens on port **55000** and manages connection requests from nodes.
 
 When starting, the master writes `join.json` with the authentication token. Restrict access to this file (for example `chmod 600`) and consider encrypting it before copying to nodes. You can also provide the token via the `CPCLUSTER_TOKEN` environment variable instead of copying the file.
 
