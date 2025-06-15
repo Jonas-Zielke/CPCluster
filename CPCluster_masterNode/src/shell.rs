@@ -1,10 +1,28 @@
 use std::sync::Arc;
 use tokio::runtime::Handle;
 
-use cpcluster_common::{Task, TaskResult};
+use cpcluster_common::{NodeRole, Task, TaskResult};
 use uuid::Uuid;
 
 use crate::state::{save_state, MasterNode};
+
+fn now_ms() -> u64 {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::from_secs(0))
+        .as_millis() as u64
+}
+
+fn has_active_node(master: &MasterNode, role: NodeRole) -> bool {
+    let timeout = master.failover_timeout_ms * 2;
+    let now = now_ms();
+    master
+        .connected_nodes
+        .blocking_lock()
+        .values()
+        .any(|n| n.role == role && now.saturating_sub(n.last_heartbeat) <= timeout)
+}
 
 async fn submit_task_and_wait(
     master: &MasterNode,
@@ -133,12 +151,7 @@ pub fn run_shell(master: Arc<MasterNode>, rt: Handle) {
                     }
                 }
                 "getglobalram" => {
-                    let has_worker = master
-                        .connected_nodes
-                        .blocking_lock()
-                        .values()
-                        .any(|n| matches!(n.role, cpcluster_common::NodeRole::Worker));
-                    if !has_worker {
+                    if !has_active_node(&master, NodeRole::Worker) {
                         println!("No worker nodes available");
                     } else {
                         match rt.block_on(submit_task_and_wait(&master, Task::GetGlobalRam, 5000)) {
@@ -149,12 +162,7 @@ pub fn run_shell(master: Arc<MasterNode>, rt: Handle) {
                     }
                 }
                 "getstorage" => {
-                    let has_disk = master
-                        .connected_nodes
-                        .blocking_lock()
-                        .values()
-                        .any(|n| matches!(n.role, cpcluster_common::NodeRole::Disk));
-                    if !has_disk {
+                    if !has_active_node(&master, NodeRole::Disk) {
                         println!("No disk nodes available");
                     } else {
                         match rt.block_on(submit_task_and_wait(&master, Task::GetStorage, 5000)) {

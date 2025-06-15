@@ -108,6 +108,10 @@ async fn heartbeat_loop(
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(
         config.failover_timeout_ms / 2,
     ));
+    // Send an initial heartbeat so the master immediately marks this node as active
+    if let Err(e) = send_message(&mut stream, NodeMessage::Heartbeat).await {
+        warn!("Initial heartbeat failed: {}", e);
+    }
     loop {
         tokio::select! {
             _ = interval.tick() => {
