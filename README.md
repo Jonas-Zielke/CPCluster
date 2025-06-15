@@ -78,8 +78,8 @@ OpenSSL development libraries manually before building.
 
 ### Configuration
 
-1. **Generate join.json**: When the master node is started, it creates a `join.json` file with a unique token for network access.
-   Set the `CPCLUSTER_JOIN` environment variable before starting the master to write the file to a different location.
+1. **Generate join.json**: When the master node is started, it creates a `join.json` file under `CPCluster_masterNode/` with a unique token for network access.
+   Set the `CPCLUSTER_JOIN` environment variable before starting the master to write the file elsewhere.
 2. **Securely distribute `join.json`**: Restrict access and encrypt the file before transferring it. One approach is:
    ```bash
    chmod 600 join.json
@@ -91,7 +91,7 @@ OpenSSL development libraries manually before building.
    ```bash
    export CPCLUSTER_TOKEN=<token-from-master>
    ```
-3. **Copy `join.json` to nodes**: If not using the environment variable, each node must have a `join.json` file identical to the one in the master node directory. Copy this file to the `CPCluster_node` directory for each node that will join the network. Nodes read from `join.json` by default, or use `CPCLUSTER_JOIN` to specify a different path.
+3. **Copy `join.json` to nodes**: If not using the environment variable, each node must have a `join.json` file identical to the one in the master node directory. Copy this file to `CPCluster_node/join.json` for each node that will join the network. Nodes read from that path by default, or use `CPCLUSTER_JOIN` to specify a different location.
 4. **Edit the configuration file**: Both master and nodes read runtime options from `CPCluster_masterNode/config/config.json` and `CPCluster_node/config/config.json` by default. You can pass a different file as the first command line argument. The configuration lets you tune the port range, failover timeout, master addresses and TLS certificates. Additional fields include `role` (`Worker`, `Disk`, `Internet`), `storage_dir`, `disk_space_mb`, `internet_ports` and `state_file`.
 5. **Generate TLS certificates (optional)**: To secure traffic between nodes and the master, create a certificate for the master node and distribute it to all nodes:
    ```bash
